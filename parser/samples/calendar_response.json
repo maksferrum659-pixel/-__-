@@ -1,0 +1,43 @@
+{
+  "_note": "RECONSTRUCTED sample for offline tests. Shape derived from the portal's public Nuxt chunks (calendar / CalendarDayPhoneView), NOT a real authenticated capture. Replace with a real DevTools capture (token/secret removed) once a live account is available.",
+  "items": [
+    {
+      "eventId": 1284563,
+      "name": "Базы данных",
+      "type": "Лекция",
+      "date": "2026-06-15",
+      "startTime": "10:40",
+      "endTime": "12:10",
+      "teacher": { "id": 412, "fullName": "Иванов Иван Иванович" },
+      "location": { "id": 7, "name": "ауд. 312" },
+      "meetingUrl": null,
+      "courses": [{ "id": 55, "name": "Прикладная информатика" }]
+    },
+    {
+      "eventId": 1284564,
+      "name": "Иностранный язык",
+      "type": "Семинар",
+      "date": "2026-06-15",
+      "startTime": "12:20",
+      "endTime": "13:50",
+      "teacher": { "id": 88, "fullName": "Петрова Анна Сергеевна" },
+      "location": null,
+      "meetingUrl": "https://telemost.example/abc-def-ghi",
+      "courses": []
+    },
+    {
+      "eventId": 1284570,
+      "name": "Физическая культура",
+      "type": null,
+      "date": "2026-06-16",
+      "startTime": "09:00",
+      "endTime": "10:30",
+      "teacher": null,
+      "location": { "id": 2, "name": "Спортзал" },
+      "meetingUrl": null
+    }
+  ],
+  "total": 3,
+  "page": 1,
+  "perPage": 70
+}
