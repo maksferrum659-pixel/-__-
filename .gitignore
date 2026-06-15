@@ -1,1 +1,13 @@
 _setup/
+
+# Секреты — НИКОГДА не коммитим
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
