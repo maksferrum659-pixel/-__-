@@ -50,6 +50,21 @@ MOSCOW_TZ = ZoneInfo("Europe/Moscow")
 #: Placeholder owner id; the real telegram_id is supplied later by db.upsert_*.
 UNKNOWN_TELEGRAM_ID = 0
 
+#: Portal `type` slugs → human-readable Russian kind (CONTRACT.md §5 examples).
+#: Unknown slugs fall through to their raw value.
+KIND_BY_TYPE: dict[str, str] = {
+    "lecture": "Лекция",
+    "practical": "Практика",
+    "practice": "Практика",
+    "seminar": "Семинар",
+    "lab": "Лабораторная",
+    "laboratory": "Лабораторная",
+    "consultation": "Консультация",
+    "exam": "Экзамен",
+    "credit": "Зачёт",
+    "test": "Зачёт",
+}
+
 
 # ── errors ────────────────────────────────────────────────────────────────────
 
@@ -197,7 +212,9 @@ def _to_event(raw: dict, *, telegram_id: int) -> ScheduleEvent | None:
     if not isinstance(raw, dict):
         return None
 
-    external_id = _first(raw, "eventId", "id", "externalId")
+    # `eventId` is often null for schedule entries; `id` (row PK) and `key`
+    # (UUID) are the stable portal identifiers used for idempotent upsert.
+    external_id = _first(raw, "eventId", "id", "key", "externalId")
     starts_at = _combine(
         _first(raw, "date", "day", "dateStart"),
         _first(raw, "startTime", "timeStart", "start"),
@@ -213,7 +230,7 @@ def _to_event(raw: dict, *, telegram_id: int) -> ScheduleEvent | None:
         external_id=str(external_id),
         telegram_id=telegram_id,
         discipline_name=str(_first(raw, "name", "title", "discipline", "subject") or ""),
-        kind=_clean(_first(raw, "type", "kind", "lessonType")),
+        kind=_map_kind(_first(raw, "type", "kind", "lessonType")),
         starts_at=starts_at,
         ends_at=ends_at,
         room=_nested_name(_first(raw, "location", "room", "place")),
@@ -271,6 +288,13 @@ def _clean(value: Any) -> str | None:
     if value in (None, ""):
         return None
     return str(value).strip() or None
+
+
+def _map_kind(value: Any) -> str | None:
+    cleaned = _clean(value)
+    if cleaned is None:
+        return None
+    return KIND_BY_TYPE.get(cleaned.lower(), cleaned)
 
 
 def _nested_name(value: Any) -> str | None:

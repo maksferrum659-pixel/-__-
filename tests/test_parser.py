@@ -27,7 +27,7 @@ def sample_payload() -> dict:
 
 def test_parse_sample_returns_events(sample_payload):
     events = parse_calendar(sample_payload)
-    assert len(events) == 3
+    assert len(events) == 7  # real capture: 2 day-buckets
     assert all(isinstance(e, ScheduleEvent) for e in events)
 
 
@@ -50,23 +50,38 @@ def test_field_mapping(sample_payload):
     events = parse_calendar(sample_payload)
     by_id = {e.external_id: e for e in events}
 
-    lecture = by_id["1284563"]
-    assert lecture.discipline_name == "Базы данных"
-    assert lecture.kind == "Лекция"
-    assert lecture.room == "ауд. 312"
-    assert lecture.teacher == "Иванов Иван Иванович"
-    assert lecture.online_link is None
-    assert (lecture.starts_at.hour, lecture.starts_at.minute) == (10, 40)
-    assert (lecture.ends_at.hour, lecture.ends_at.minute) == (12, 10)
+    # id=5601: lecture in room 3304 (eventId is null in real data → falls back to id)
+    lecture = by_id["5601"]
+    assert lecture.discipline_name == "Цифровые технологии и тенденции развития"
+    assert lecture.kind == "Лекция"  # "lecture" slug mapped to Russian
+    assert lecture.room == "3304"
+    assert lecture.teacher == "Преподаватель2 Имя2 Отч2"
+    # startTime/endTime are Moscow wall-clock (UTC+3), not the UTC dateStart
+    assert (lecture.starts_at.hour, lecture.starts_at.minute) == (9, 0)
+    assert (lecture.ends_at.hour, lecture.ends_at.minute) == (10, 20)
 
-    seminar = by_id["1284564"]
-    assert seminar.online_link == "https://telemost.example/abc-def-ghi"
-    assert seminar.room is None  # location was null
+    # id=5594: practical, location was null → room None
+    practical = by_id["5594"]
+    assert practical.kind == "Практика"  # "practical" slug mapped
+    assert practical.room is None
+    assert (practical.starts_at.hour, practical.starts_at.minute) == (7, 30)
 
-    pe = by_id["1284570"]
-    assert pe.kind is None
-    assert pe.teacher is None
-    assert pe.room == "Спортзал"
+
+def test_kind_slug_mapping():
+    payload = {
+        "results": [
+            {
+                "date": "2026-09-01",
+                "events": [
+                    {"id": 1, "name": "X", "type": "seminar", "startTime": "10:00", "endTime": "11:00"},
+                    {"id": 2, "name": "Y", "type": "WeirdSlug", "startTime": "11:00", "endTime": "12:00"},
+                ],
+            }
+        ]
+    }
+    by_id = {e.external_id: e for e in parse_calendar(payload)}
+    assert by_id["1"].kind == "Семинар"
+    assert by_id["2"].kind == "WeirdSlug"  # unknown slug passes through unchanged
 
 
 def test_skips_incomplete_events():
@@ -115,7 +130,7 @@ def test_fetch_schedule_maps_response(sample_payload):
 
     client = httpx.Client(transport=httpx.MockTransport(handler), base_url="https://portal.test")
     events = fetch_schedule("session=abc123", date(2026, 6, 15), date(2026, 6, 20), client=client)
-    assert len(events) == 3
+    assert len(events) == 7
 
 
 def test_fetch_schedule_raises_on_expired_session():
