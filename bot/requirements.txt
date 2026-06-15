@@ -1,0 +1,13 @@
+# Зависимости ветки bot (CONTRACT.md §2). Версии — в пределах мажоров стека.
+aiogram>=3.4,<4
+APScheduler>=3.10,<4
+python-dotenv>=1.0
+
+# Тесты
+pytest>=8.0
+
+# Предоставляются другими модулями на интеграции (здесь — для справки):
+#   pydantic>=2     -> shared.models
+#   httpx           -> parser
+#   cryptography    -> core.security
+#   supabase        -> db
