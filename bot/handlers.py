@@ -17,6 +17,7 @@ from aiogram.types import Message
 
 import db
 from core.deadline_extractor import extract_deadline
+from core import ai_chat
 from core.llm import GigaChatClient
 from core.security import encrypt_token
 import parser
@@ -139,6 +140,50 @@ async def cmd_credits(message: Message, settings: Settings) -> None:
     deadlines = db.list_deadlines(message.chat.id, only_open=True) if message.chat.type != "private" else []
     deadlines = [d for d in deadlines if d.work_type and d.work_type.lower() in control]
     await message.answer(format_credits(events, deadlines))
+
+
+# --------------------------------------------------------------------------- #
+# ИИ-чат: /ask <вопрос>
+# --------------------------------------------------------------------------- #
+@router.message(Command("ask"))
+async def cmd_ask(message: Message, command: CommandObject, settings: Settings) -> None:
+    question = (command.args or "").strip()
+    if not question:
+        await message.answer("Задай вопрос: <code>/ask что задали по праву?</code>")
+        return
+
+    tz = _tz(settings)
+    now = datetime.now(tz)
+
+    # В группе запоминаем привязку chat_id → user, чтобы /ask работал и в личке
+    if message.chat.type in ("group", "supergroup"):
+        chat_id: int | None = message.chat.id
+        db.save_group_chat_id(message.from_user.id, chat_id)
+    else:
+        chat_id = db.get_group_chat_id(message.from_user.id)
+
+    deadlines = db.list_deadlines(chat_id, only_open=True) if chat_id else []
+    group_messages = db.get_group_messages(chat_id) if chat_id else []
+    schedule = db.get_schedule(message.from_user.id, now, now + timedelta(days=7))
+
+    thinking = await message.answer("Думаю…")
+
+    try:
+        answer = ai_chat.answer_question(
+            question,
+            _llm,
+            deadlines=deadlines,
+            schedule=schedule,
+            group_messages=group_messages,
+        )
+    except Exception:
+        logger.exception("Ошибка ИИ-чата (chat=%s)", message.chat.id)
+        await thinking.delete()
+        await message.answer("Не удалось получить ответ от ИИ. Попробуй позже.")
+        return
+
+    await thinking.delete()
+    await message.answer(answer)
 
 
 # --------------------------------------------------------------------------- #

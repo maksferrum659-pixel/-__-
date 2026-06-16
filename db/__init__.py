@@ -93,3 +93,49 @@ def list_users_with_token() -> list[int]:
         "portal_token_encrypted", "null"
     ).execute()
     return [row["telegram_id"] for row in result.data]
+
+
+def save_group_chat_id(telegram_id: int, chat_id: int) -> None:
+    supabase.table("users").upsert(
+        {"telegram_id": telegram_id, "group_chat_id": chat_id},
+        on_conflict="telegram_id",
+    ).execute()
+
+
+def get_group_chat_id(telegram_id: int) -> Optional[int]:
+    result = supabase.table("users").select("group_chat_id").eq(
+        "telegram_id", telegram_id
+    ).execute()
+    if result.data:
+        return result.data[0].get("group_chat_id")
+    return None
+
+
+def save_group_message(
+    chat_id: int,
+    text: str,
+    sent_at: datetime,
+    telegram_id: Optional[int] = None,
+    username: Optional[str] = None,
+    full_name: Optional[str] = None,
+    message_id: Optional[int] = None,
+) -> None:
+    row = {
+        "chat_id": chat_id,
+        "text": text,
+        "sent_at": sent_at.isoformat(),
+        "telegram_id": telegram_id,
+        "username": username,
+        "full_name": full_name,
+        "message_id": message_id,
+    }
+    supabase.table("group_messages").upsert(
+        row, on_conflict="chat_id,message_id"
+    ).execute()
+
+
+def get_group_messages(chat_id: int, limit: int = 200) -> list[dict]:
+    result = supabase.table("group_messages").select(
+        "full_name, username, text, sent_at"
+    ).eq("chat_id", chat_id).order("sent_at", desc=True).limit(limit).execute()
+    return list(reversed(result.data))
