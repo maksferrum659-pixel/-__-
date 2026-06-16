@@ -34,7 +34,8 @@ def _require(name: str) -> str:
 @dataclass(frozen=True)
 class Settings:
     # --- секреты / адреса (CONTRACT.md §8) ---
-    bot_token: str
+    bot_token: str            # личный бот (студент ↔ бот)
+    group_bot_token: str      # групповой бот (мониторинг чата)
     gigachat_credentials: str
     fernet_key: str
     supabase_url: str
@@ -54,6 +55,7 @@ def load_settings() -> Settings:
     """Собрать Settings из окружения. Бросает ConfigError при нехватке секретов."""
     return Settings(
         bot_token=_require("BOT_TOKEN"),
+        group_bot_token=_require("GROUP_BOT_TOKEN"),
         gigachat_credentials=_require("GIGACHAT_CREDENTIALS"),
         fernet_key=_require("FERNET_KEY"),
         supabase_url=_require("SUPABASE_URL"),
