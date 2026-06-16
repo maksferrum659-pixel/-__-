@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -13,7 +14,14 @@ from aiogram import F, Router
 from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import Message
+from aiogram.types import (
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    KeyboardButton,
+    Message,
+    ReplyKeyboardMarkup,
+)
 
 import db
 from core.deadline_extractor import extract_deadline
@@ -37,8 +45,48 @@ class PortalLink(StatesGroup):
     waiting_credentials = State()
 
 
+class YandexEmail(StatesGroup):
+    """FSM сохранения Яндекс-почты для календаря."""
+    waiting_email = State()
+
+
+class DisciplineSearch(StatesGroup):
+    """FSM поиска по предмету через кнопку."""
+    waiting_name = State()
+
+
+GROUPS = ["Группа 1", "Группа 2"]
+
+
 def _tz(settings: Settings) -> ZoneInfo:
     return ZoneInfo(settings.timezone)
+
+
+def _commands_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="📅 Сегодня"), KeyboardButton(text="📆 Неделя")],
+            [KeyboardButton(text="🎓 Зачёты"), KeyboardButton(text="🔍 По предмету")],
+        ],
+        resize_keyboard=True,
+        is_persistent=True,
+    )
+
+
+def _group_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"👥 {g}", callback_data=f"group:{g}")] for g in GROUPS
+    ])
+
+
+def _main_keyboard(current_group: str | None = None) -> InlineKeyboardMarkup:
+    group_label = f"👥 Группа: {current_group}" if current_group else "👥 Выбрать группу"
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=group_label, callback_data="do_group")],
+        [InlineKeyboardButton(text="🔗 Привязать портал РАНХИГС", callback_data="do_link")],
+        [InlineKeyboardButton(text="📧 Указать Яндекс-почту", callback_data="do_email")],
+        [InlineKeyboardButton(text="📱 Мини-приложение (скоро)", callback_data="miniapp_soon")],
+    ])
 
 
 # --------------------------------------------------------------------------- #
@@ -47,11 +95,84 @@ def _tz(settings: Settings) -> ZoneInfo:
 @router.message(CommandStart())
 async def cmd_start(message: Message) -> None:
     db.get_or_create_user(message.from_user.id)
+    name = message.from_user.first_name or "студент"
+    current_group = db.get_academic_group(message.from_user.id)
     await message.answer(
-        "Привет! Я свожу твоё расписание и дедлайны в одно место.\n\n"
-        "Чтобы подтянуть расписание — привяжи портал командой /link "
-        "(логин и пароль присылай только мне в личку).\n\n"
-        "Команды: /today /week /discipline &lt;название&gt; /credits"
+        f"Привет, {name}! 👋\n\n"
+        "Я <b>помогаю студентам РАНХИГС</b> не терять расписание и дедлайны.\n\n"
+        "<b>Что я умею:</b>\n"
+        "📅 Расписание на сегодня и неделю\n"
+        "🔍 Поиск по предмету — пары и дедлайны\n"
+        "🎓 Зачёты и экзамены\n"
+        "🤖 Слушаю групповой чат и сам нахожу дедлайны\n\n"
+        "<b>Чтобы начать, нужно:</b>\n"
+        "1️⃣ Выбрать свою группу\n"
+        "2️⃣ Привязать логин/пароль от портала rr-edu.ranepa.ru\n"
+        "3️⃣ Указать Яндекс-почту для подписки на календарь\n\n"
+        "Нажми кнопку ниже 👇",
+        reply_markup=_commands_keyboard(),
+    )
+    await message.answer("Настройки:", reply_markup=_main_keyboard(current_group))
+    if not current_group:
+        await message.answer("Для начала выбери свою группу:", reply_markup=_group_keyboard())
+
+
+@router.callback_query(lambda c: c.data == "do_link")
+async def on_cb_link(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    await state.set_state(PortalLink.waiting_credentials)
+    await callback.message.answer(
+        "Пришли логин и пароль от портала одним сообщением через пробел:\n"
+        "<code>логин пароль</code>\n\n"
+        "Я зашифрую токен и сразу удалю твоё сообщение. Пароль нигде не сохраняю."
+    )
+
+
+@router.callback_query(lambda c: c.data == "do_email")
+async def on_cb_email(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    await state.set_state(YandexEmail.waiting_email)
+    await callback.message.answer(
+        "Пришли свой Яндекс-адрес, чтобы я мог отправить ссылку на подписку календаря:\n"
+        "<code>example@yandex.ru</code>"
+    )
+
+
+@router.callback_query(lambda c: c.data == "miniapp_soon")
+async def on_cb_miniapp(callback: CallbackQuery) -> None:
+    await callback.answer("Мини-приложение в разработке — скоро будет! 🚀", show_alert=True)
+
+
+@router.callback_query(lambda c: c.data == "do_group")
+async def on_cb_do_group(callback: CallbackQuery) -> None:
+    await callback.answer()
+    await callback.message.answer("Выбери свою группу:", reply_markup=_group_keyboard())
+
+
+@router.callback_query(lambda c: c.data and c.data.startswith("group:"))
+async def on_cb_group_selected(callback: CallbackQuery) -> None:
+    group = callback.data.split(":", 1)[1]
+    if group not in GROUPS:
+        await callback.answer("Неизвестная группа.", show_alert=True)
+        return
+    db.save_academic_group(callback.from_user.id, group)
+    await callback.answer(f"✅ Сохранено: {group}", show_alert=False)
+    await callback.message.edit_text(
+        f"✅ Твоя группа: <b>{group}</b>\n\nТеперь привяжи портал — нажми «Настройки» (/start)."
+    )
+
+
+@router.message(YandexEmail.waiting_email, F.chat.type == "private", F.text)
+async def on_yandex_email(message: Message, state: FSMContext) -> None:
+    await state.clear()
+    email = (message.text or "").strip()
+    if "@" not in email or "." not in email.split("@")[-1]:
+        await message.answer("Не похоже на почту. Попробуй ещё раз — нажми «Указать Яндекс-почту».")
+        return
+    db.save_yandex_email(message.from_user.id, email)
+    await message.answer(
+        f"✅ Почта <code>{email}</code> сохранена.\n"
+        "Когда подключим календарь — пришлю ссылку на подписку."
     )
 
 
@@ -66,7 +187,7 @@ async def cmd_link(message: Message, state: FSMContext) -> None:
 
 
 @router.message(PortalLink.waiting_credentials, F.chat.type == "private", F.text)
-async def on_credentials(message: Message, state: FSMContext) -> None:
+async def on_credentials(message: Message, state: FSMContext, settings: Settings) -> None:
     await state.clear()
     # Удаляем сообщение с паролем как можно раньше; не логируем содержимое.
     try:
@@ -90,7 +211,9 @@ async def on_credentials(message: Message, state: FSMContext) -> None:
         del password  # на всякий случай не держим пароль в кадре дольше нужного
 
     db.save_portal_token(message.from_user.id, encrypt_token(token))
-    await message.answer("Готово ✅ Портал привязан. Скоро подтяну расписание.")
+    await message.answer("Готово ✅ Портал привязан. Подтягиваю расписание…")
+    from .scheduler import sync_schedules
+    asyncio.create_task(sync_schedules(settings))
 
 
 @router.message(Command("today"))
@@ -134,11 +257,48 @@ async def cmd_credits(message: Message, settings: Settings) -> None:
     tz = _tz(settings)
     now = datetime.now(tz)
     events = db.get_schedule(message.from_user.id, now, now + timedelta(days=120))
-    control = {"зачёт", "зачет", "экзамен"}
-    events = [e for e in events if e.kind and e.kind.lower() in control]
+    control = {"зачёт", "зачет", "экзамен", "зачет с оценкой", "зачёт с оценкой", "дифференцированный зачёт", "дифференцированный зачет"}
+    events = [e for e in events if e.kind and any(k in e.kind.lower() for k in control)]
     deadlines = db.list_deadlines(message.chat.id, only_open=True) if message.chat.type != "private" else []
     deadlines = [d for d in deadlines if d.work_type and d.work_type.lower() in control]
     await message.answer(format_credits(events, deadlines))
+
+
+# --------------------------------------------------------------------------- #
+# Кнопки нижней клавиатуры (личка)
+# --------------------------------------------------------------------------- #
+@router.message(F.text == "📅 Сегодня", F.chat.type == "private")
+async def btn_today(message: Message, settings: Settings) -> None:
+    await cmd_today(message, settings)
+
+
+@router.message(F.text == "📆 Неделя", F.chat.type == "private")
+async def btn_week(message: Message, settings: Settings) -> None:
+    await cmd_week(message, settings)
+
+
+@router.message(F.text == "🎓 Зачёты", F.chat.type == "private")
+async def btn_credits(message: Message, settings: Settings) -> None:
+    await cmd_credits(message, settings)
+
+
+@router.message(F.text == "🔍 По предмету", F.chat.type == "private")
+async def btn_discipline(message: Message, state: FSMContext) -> None:
+    await state.set_state(DisciplineSearch.waiting_name)
+    await message.answer("Напиши название предмета (или часть):")
+
+
+@router.message(DisciplineSearch.waiting_name, F.chat.type == "private", F.text)
+async def on_discipline_name(message: Message, state: FSMContext, settings: Settings) -> None:
+    await state.clear()
+    name = (message.text or "").strip()
+    tz = _tz(settings)
+    now = datetime.now(tz)
+    events = db.get_schedule(message.from_user.id, now, now + timedelta(days=30))
+    events = [e for e in events if name.lower() in e.discipline_name.lower()]
+    deadlines = db.list_deadlines(message.chat.id, only_open=True)
+    deadlines = [d for d in deadlines if d.discipline_name and name.lower() in d.discipline_name.lower()]
+    await message.answer(format_discipline(name, events, deadlines))
 
 
 # --------------------------------------------------------------------------- #

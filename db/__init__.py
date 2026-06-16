@@ -88,6 +88,29 @@ def mark_deadline_done(telegram_id: int, deadline_id: str, done: bool) -> None:
     }, on_conflict="telegram_id,deadline_id").execute()
 
 
+def save_academic_group(telegram_id: int, group: str) -> None:
+    supabase.table("users").upsert({
+        "telegram_id": telegram_id,
+        "academic_group": group,
+    }, on_conflict="telegram_id").execute()
+
+
+def get_academic_group(telegram_id: int) -> str | None:
+    result = supabase.table("users").select("academic_group").eq(
+        "telegram_id", telegram_id
+    ).execute()
+    if result.data:
+        return result.data[0].get("academic_group")
+    return None
+
+
+def save_yandex_email(telegram_id: int, email: str) -> None:
+    supabase.table("users").upsert({
+        "telegram_id": telegram_id,
+        "yandex_email": email,
+    }, on_conflict="telegram_id").execute()
+
+
 def list_users_with_token() -> list[int]:
     result = supabase.table("users").select("telegram_id").not_.is_(
         "portal_token_encrypted", "null"

@@ -26,7 +26,7 @@ async def sync_schedules(settings: Settings) -> None:
     """Подтянуть свежее расписание для всех привязавших портал пользователей."""
     tz = ZoneInfo(settings.timezone)
     today = datetime.now(tz).date()
-    since, until = today, today + timedelta(days=14)
+    since, until = today, today + timedelta(days=90)
     for telegram_id in db.list_users_with_token():
         enc = db.get_portal_token(telegram_id)
         if not enc:

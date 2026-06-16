@@ -6,6 +6,7 @@ import logging
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
+from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 
@@ -20,8 +21,10 @@ logger = logging.getLogger(__name__)
 async def main() -> None:
     settings = load_settings()
 
+    session = AiohttpSession(proxy="socks5://127.0.0.1:10808")
     bot = Bot(
         token=settings.bot_token,
+        session=session,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML, link_preview_is_disabled=True),
     )
     dp = Dispatcher(storage=MemoryStorage())
