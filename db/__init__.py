@@ -93,3 +93,12 @@ def list_users_with_token() -> list[int]:
         "portal_token_encrypted", "null"
     ).execute()
     return [row["telegram_id"] for row in result.data]
+
+
+def get_group_chat_id(telegram_id: int) -> Optional[int]:
+    result = supabase.table("users").select("group_chat_id").eq(
+        "telegram_id", telegram_id
+    ).execute()
+    if result.data:
+        return result.data[0].get("group_chat_id")
+    return None

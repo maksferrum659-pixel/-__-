@@ -13,7 +13,7 @@ from aiogram import F, Router
 from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import Message
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message, WebAppInfo
 
 import db
 from core.deadline_extractor import extract_deadline
@@ -139,6 +139,23 @@ async def cmd_credits(message: Message, settings: Settings) -> None:
     deadlines = db.list_deadlines(message.chat.id, only_open=True) if message.chat.type != "private" else []
     deadlines = [d for d in deadlines if d.work_type and d.work_type.lower() in control]
     await message.answer(format_credits(events, deadlines))
+
+
+# --------------------------------------------------------------------------- #
+# Telegram Mini App
+# --------------------------------------------------------------------------- #
+@router.message(Command("app"))
+async def cmd_app(message: Message, settings: Settings) -> None:
+    if not settings.mini_app_url:
+        await message.answer("Mini App пока не настроен (нет MINI_APP_URL в .env).")
+        return
+    kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(
+            text="📱 Открыть расписание",
+            web_app=WebAppInfo(url=settings.mini_app_url),
+        )
+    ]])
+    await message.answer("Нажми кнопку, чтобы открыть расписание:", reply_markup=kb)
 
 
 # --------------------------------------------------------------------------- #
