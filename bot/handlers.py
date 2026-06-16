@@ -21,6 +21,7 @@ from aiogram.types import (
     KeyboardButton,
     Message,
     ReplyKeyboardMarkup,
+    WebAppInfo,
 )
 
 import db
@@ -139,8 +140,18 @@ async def on_cb_email(callback: CallbackQuery, state: FSMContext) -> None:
 
 
 @router.callback_query(lambda c: c.data == "miniapp_soon")
-async def on_cb_miniapp(callback: CallbackQuery) -> None:
-    await callback.answer("Мини-приложение в разработке — скоро будет! 🚀", show_alert=True)
+async def on_cb_miniapp(callback: CallbackQuery, settings: Settings) -> None:
+    if settings.mini_app_url:
+        await callback.answer()
+        kb = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(
+                text="📱 Открыть расписание",
+                web_app=WebAppInfo(url=settings.mini_app_url),
+            )
+        ]])
+        await callback.message.answer("Нажми кнопку, чтобы открыть расписание:", reply_markup=kb)
+    else:
+        await callback.answer("Мини-приложение в разработке — скоро будет! 🚀", show_alert=True)
 
 
 @router.callback_query(lambda c: c.data == "do_group")

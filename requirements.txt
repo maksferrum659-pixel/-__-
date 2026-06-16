@@ -20,6 +20,10 @@ APScheduler>=3.10,<4
 # Конфигурация
 python-dotenv>=1.0.0
 
+# Mini App сервер (mini_app/)
+fastapi>=0.110.0
+uvicorn>=0.29.0
+
 # Тесты
 pytest>=7.0.0
 pytest-dotenv>=0.5.2
