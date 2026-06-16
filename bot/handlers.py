@@ -129,6 +129,21 @@ async def cmd_discipline(message: Message, command: CommandObject, settings: Set
     await message.answer(format_discipline(name, events, deadlines))
 
 
+@router.message(Command("calendar"), F.chat.type == "private")
+async def cmd_calendar(message: Message, settings: Settings) -> None:
+    token = db.get_or_create_ical_token(message.from_user.id)
+    base = (settings.calendar_base_url or "").rstrip("/")
+    url = f"{base}/ical/{token}.ics"
+    webcal = url.replace("https://", "webcal://").replace("http://", "webcal://")
+    await message.answer(
+        "📅 <b>Подписка на календарь</b>\n\n"
+        "Скопируй ссылку и добавь в Яндекс.Календарь:\n"
+        "<b>Добавить календарь → Подписка → вставь URL</b>\n\n"
+        f"<code>{webcal}</code>\n\n"
+        "Работает также с Google Calendar, Apple Calendar, Outlook.",
+    )
+
+
 @router.message(Command("credits"))
 async def cmd_credits(message: Message, settings: Settings) -> None:
     tz = _tz(settings)

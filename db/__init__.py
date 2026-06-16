@@ -93,3 +93,30 @@ def list_users_with_token() -> list[int]:
         "portal_token_encrypted", "null"
     ).execute()
     return [row["telegram_id"] for row in result.data]
+
+
+def get_or_create_ical_token(telegram_id: int) -> str:
+    """Вернуть ical_token пользователя (UUID). Требует миграции 002_add_ical_token.sql."""
+    import uuid as _uuid
+    get_or_create_user(telegram_id)
+    result = supabase.table("users").select("ical_token").eq(
+        "telegram_id", telegram_id
+    ).execute()
+    token = result.data[0].get("ical_token") if result.data else None
+    if token:
+        return token
+    # Колонка есть (DEFAULT gen_random_uuid), но значение NULL — обновляем вручную
+    new_token = str(_uuid.uuid4())
+    supabase.table("users").update({"ical_token": new_token}).eq(
+        "telegram_id", telegram_id
+    ).execute()
+    return new_token
+
+
+def get_telegram_id_by_ical_token(token: str) -> Optional[int]:
+    result = supabase.table("users").select("telegram_id").eq(
+        "ical_token", token
+    ).execute()
+    if result.data:
+        return result.data[0]["telegram_id"]
+    return None

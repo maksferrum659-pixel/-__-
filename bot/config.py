@@ -40,6 +40,7 @@ class Settings:
     supabase_url: str
     supabase_service_key: str
     portal_base_url: str = "https://rr-edu.ranepa.ru"
+    calendar_base_url: str = ""  # URL сервера ICS-фида, напр. https://yourbot.ru
 
     # --- настраиваемое поведение (ПРОВИЗОРНЫЕ дефолты, не из контракта) ---
     timezone: str = "Europe/Moscow"
@@ -59,4 +60,5 @@ def load_settings() -> Settings:
         supabase_url=_require("SUPABASE_URL"),
         supabase_service_key=_require("SUPABASE_SERVICE_KEY"),
         portal_base_url=os.getenv("PORTAL_BASE_URL", "https://rr-edu.ranepa.ru"),
+        calendar_base_url=os.getenv("CALENDAR_BASE_URL", ""),
     )
