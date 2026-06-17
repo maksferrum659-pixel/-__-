@@ -28,6 +28,10 @@ import db
 
 _TZ = ZoneInfo("Europe/Moscow")
 _HERE = Path(__file__).parent
+_CREDIT_KINDS = {
+    "зачёт", "зачет", "экзамен", "зачет с оценкой", "зачёт с оценкой",
+    "дифференцированный зачёт", "дифференцированный зачет",
+}
 
 app = FastAPI(title="Учёба Бот — Mini App API")
 
@@ -78,6 +82,38 @@ def get_week(x_init_data: str = Header(..., alias="x-init-data")):
     sunday = monday + timedelta(days=6, hours=23, minutes=59, seconds=59)
     events = db.get_schedule(telegram_id, monday, sunday)
     return [e.model_dump(mode="json") for e in events]
+
+
+# ── Зачёты/экзамены ──────────────────────────────────────────────────────────
+
+@app.get("/api/exams")
+def get_exams(x_init_data: str = Header(..., alias="x-init-data")):
+    telegram_id = _verify_init_data(x_init_data)
+    now = datetime.now(_TZ)
+    events = db.get_schedule(telegram_id, now, now + timedelta(days=120))
+    events = [e for e in events if e.kind and any(k in e.kind.lower() for k in _CREDIT_KINDS)]
+    chat_id = db.get_group_chat_id(telegram_id)
+    deadlines = db.list_deadlines(chat_id, only_open=True) if chat_id else []
+    deadlines = [d for d in deadlines if d.work_type and d.work_type.lower() in _CREDIT_KINDS]
+    return {
+        "events": [e.model_dump(mode="json") for e in events],
+        "deadlines": [d.model_dump(mode="json") for d in deadlines],
+    }
+
+
+# ── Поиск по предмету ────────────────────────────────────────────────────────
+
+@app.get("/api/subjects")
+def get_subjects(x_init_data: str = Header(..., alias="x-init-data")):
+    telegram_id = _verify_init_data(x_init_data)
+    now = datetime.now(_TZ)
+    events = db.get_schedule(telegram_id, now, now + timedelta(days=30))
+    chat_id = db.get_group_chat_id(telegram_id)
+    deadlines = db.list_deadlines(chat_id, only_open=True) if chat_id else []
+    return {
+        "events": [e.model_dump(mode="json") for e in events],
+        "deadlines": [d.model_dump(mode="json") for d in deadlines],
+    }
 
 
 # ── Дедлайны ──────────────────────────────────────────────────────────────────

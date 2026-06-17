@@ -48,10 +48,32 @@
   'use strict';
 
   var tg = window.Telegram && window.Telegram.WebApp;
+  var INIT_DATA = (tg && tg.initData) || '';
   var ACTIVE = '#2f86ff';
   var IDLE = '#aab2c0';
 
-  var state = { screen: 'home', selectedDay: 0, query: '' };
+  var PALETTE = [
+    { accent: '#2f86ff', bg: '#e6f0fe' },
+    { accent: '#34a853', bg: '#e4f5ea' },
+    { accent: '#8b5cf6', bg: '#efeaf6' },
+    { accent: '#f5a623', bg: '#fdf1e0' },
+    { accent: '#e23b3b', bg: '#fde9e9' },
+  ];
+  var SUBJECT_EMOJI = ['📚', '📐', '🧪', '💻', '📜', '🗣️', '🎨', '⚙️'];
+  var WEEKDAY_SHORT = ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'];
+  var WEEKDAY_LONG = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота', 'Воскресенье'];
+  var MONTHS_RU = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
+  var MONTHS_SHORT_RU = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
+
+  var state = {
+    screen: 'home',
+    selectedDay: 0,
+    query: '',
+    today: { status: 'idle', lessons: [] },
+    week: { status: 'idle', days: [], subtitle: '' },
+    exams: { status: 'idle', items: [], subtitle: '' },
+    subjects: { status: 'idle', items: [] },
+  };
 
   var titles = {
     home: ['Учёба Бот', 'мини-приложение'],
@@ -62,68 +84,72 @@
     day: ['День', 'расписание дня'],
   };
 
-  var weekData = [
-    { num: '16', dow: 'пн', name: 'Понедельник', date: '16 июня', range: '09:00 – 15:40', count: '4 пары', accent: '#2f86ff', bg: '#e6f0fe', opacity: '1', lessons: [
-      { time: '09:00', end: '10:30', subject: 'Математический анализ', room: 'ауд. 312', teacher: 'Иванов И. И.', type: 'Лекция', accent: '#2f86ff', bg: '#e6f0fe' },
-      { time: '10:40', end: '12:10', subject: 'Программирование', room: 'ауд. 405', teacher: 'Петрова А. С.', type: 'Практика', accent: '#34a853', bg: '#e4f5ea' },
-      { time: '12:30', end: '14:00', subject: 'История России', room: 'ауд. 201', teacher: 'Орлова Н. В.', type: 'Лекция', accent: '#8b5cf6', bg: '#efeaf6' },
-      { time: '14:10', end: '15:40', subject: 'Физкультура', room: 'спортзал', teacher: 'Белов А. Р.', type: 'Практика', accent: '#f5a623', bg: '#fdf1e0' },
-    ] },
-    { num: '17', dow: 'вт', name: 'Вторник', date: '17 июня', range: '10:40 – 14:00', count: '3 пары', accent: '#34a853', bg: '#e4f5ea', opacity: '1', lessons: [
-      { time: '10:40', end: '12:10', subject: 'Базы данных', room: 'ауд. 405', teacher: 'Соколов Д. М.', type: 'Лекция', accent: '#8b5cf6', bg: '#efeaf6' },
-      { time: '12:30', end: '14:00', subject: 'Английский язык', room: 'ауд. 210', teacher: 'Смирнова Е. В.', type: 'Семинар', accent: '#f5a623', bg: '#fdf1e0' },
-      { time: '14:10', end: '15:40', subject: 'Физика', room: 'ауд. 118', teacher: 'Кузнецов П. О.', type: 'Лаборатория', accent: '#2f86ff', bg: '#e6f0fe' },
-    ] },
-    { num: '18', dow: 'ср', name: 'Среда', date: '18 июня', range: '09:00 – 16:20', count: '5 пар', accent: '#8b5cf6', bg: '#efeaf6', opacity: '1', lessons: [
-      { time: '09:00', end: '10:30', subject: 'Высшая математика', room: 'ауд. 312', teacher: 'Иванов И. И.', type: 'Лекция', accent: '#2f86ff', bg: '#e6f0fe' },
-      { time: '10:40', end: '12:10', subject: 'Программирование', room: 'ауд. 405', teacher: 'Петрова А. С.', type: 'Практика', accent: '#34a853', bg: '#e4f5ea' },
-      { time: '12:30', end: '14:00', subject: 'Базы данных', room: 'ауд. 408', teacher: 'Соколов Д. М.', type: 'Практика', accent: '#8b5cf6', bg: '#efeaf6' },
-      { time: '14:10', end: '15:40', subject: 'Английский язык', room: 'ауд. 210', teacher: 'Смирнова Е. В.', type: 'Семинар', accent: '#f5a623', bg: '#fdf1e0' },
-      { time: '14:50', end: '16:20', subject: 'Философия', room: 'ауд. 105', teacher: 'Громова Л. И.', type: 'Лекция', accent: '#e23b3b', bg: '#fde9e9' },
-    ] },
-    { num: '19', dow: 'чт', name: 'Четверг', date: '19 июня', range: '10:40 – 15:40', count: '4 пары', accent: '#f5a623', bg: '#fdf1e0', opacity: '1', lessons: [
-      { time: '10:40', end: '12:10', subject: 'Математический анализ', room: 'ауд. 312', teacher: 'Иванов И. И.', type: 'Практика', accent: '#2f86ff', bg: '#e6f0fe' },
-      { time: '12:30', end: '14:00', subject: 'Программирование', room: 'ауд. 405', teacher: 'Петрова А. С.', type: 'Лаборатория', accent: '#34a853', bg: '#e4f5ea' },
-      { time: '14:10', end: '15:40', subject: 'Физика', room: 'ауд. 118', teacher: 'Кузнецов П. О.', type: 'Лекция', accent: '#8b5cf6', bg: '#efeaf6' },
-      { time: '15:50', end: '17:20', subject: 'История России', room: 'ауд. 201', teacher: 'Орлова Н. В.', type: 'Семинар', accent: '#f5a623', bg: '#fdf1e0' },
-    ] },
-    { num: '20', dow: 'пт', name: 'Пятница', date: '20 июня', range: '09:00 – 14:00', count: '4 пары', accent: '#e23b3b', bg: '#fde9e9', opacity: '1', lessons: [
-      { time: '09:00', end: '10:30', subject: 'Базы данных', room: 'ауд. 405', teacher: 'Соколов Д. М.', type: 'Лекция', accent: '#8b5cf6', bg: '#efeaf6' },
-      { time: '10:40', end: '12:10', subject: 'Английский язык', room: 'ауд. 210', teacher: 'Смирнова Е. В.', type: 'Семинар', accent: '#f5a623', bg: '#fdf1e0' },
-      { time: '12:30', end: '14:00', subject: 'Физика', room: 'ауд. 118', teacher: 'Кузнецов П. О.', type: 'Лаборатория', accent: '#2f86ff', bg: '#e6f0fe' },
-      { time: '14:10', end: '15:40', subject: 'Философия', room: 'ауд. 105', teacher: 'Громова Л. И.', type: 'Семинар', accent: '#e23b3b', bg: '#fde9e9' },
-    ] },
-    { num: '21', dow: 'сб', name: 'Суббота', date: '21 июня', range: 'занятий нет', count: 'выходной', accent: '#9aa3b1', bg: '#eef1f5', opacity: '0.6', lessons: [] },
-  ];
-
-  var todayLessons = [
-    { time: '09:00', end: '10:30', subject: 'Математический анализ', room: 'ауд. 312', teacher: 'Иванов И. И.', type: 'Лекция', accent: '#2f86ff', bg: '#e6f0fe' },
-    { time: '10:40', end: '12:10', subject: 'Программирование', room: 'ауд. 405', teacher: 'Петрова А. С.', type: 'Практика', accent: '#34a853', bg: '#e4f5ea' },
-    { time: '12:30', end: '14:00', subject: 'Английский язык', room: 'ауд. 210', teacher: 'Смирнова Е. В.', type: 'Семинар', accent: '#f5a623', bg: '#fdf1e0' },
-    { time: '14:10', end: '15:40', subject: 'Физика', room: 'ауд. 118', teacher: 'Кузнецов П. О.', type: 'Лаборатория', accent: '#8b5cf6', bg: '#efeaf6' },
-  ];
-
-  var exams = [
-    { day: '23', month: 'июн', subject: 'Высшая математика', type: 'Зачёт', teacher: 'Иванов И. И.', time: 'ауд. 312', left: '6 дн', accent: '#34a853', bg: '#e4f5ea' },
-    { day: '24', month: 'июн', subject: 'Базы данных', type: 'Экзамен', teacher: 'Соколов Д. М.', time: '10:00, ауд. 405', left: '7 дн', accent: '#e23b3b', bg: '#fde9e9' },
-    { day: '28', month: 'июн', subject: 'Английский язык', type: 'Зачёт', teacher: 'Смирнова Е. В.', time: 'ауд. 210', left: '11 дн', accent: '#f5a623', bg: '#fdf1e0' },
-    { day: '02', month: 'июл', subject: 'Программирование', type: 'Экзамен', teacher: 'Петрова А. С.', time: '12:00, ауд. 118', left: '15 дн', accent: '#8b5cf6', bg: '#efeaf6' },
-    { day: '05', month: 'июл', subject: 'Физика', type: 'Экзамен', teacher: 'Кузнецов П. О.', time: '09:00, ауд. 220', left: '18 дн', accent: '#2f86ff', bg: '#e6f0fe' },
-  ];
-
-  var allSubjects = [
-    { name: 'Математический анализ', meta: 'Лекция · Пн, Ср · Иванов И. И.', emoji: '📐', bg: '#e6f0fe', kw: 'математ матан анализ' },
-    { name: 'Программирование', meta: 'Практика · Пн, Чт · Петрова А. С.', emoji: '💻', bg: '#e4f5ea', kw: 'программ код питон' },
-    { name: 'Базы данных', meta: 'Экзамен 24 июня · Соколов Д. М.', emoji: '🗄️', bg: '#efeaf6', kw: 'базы данных sql бд' },
-    { name: 'Английский язык', meta: 'Семинар · Вт · Смирнова Е. В.', emoji: '🇬🇧', bg: '#fdf1e0', kw: 'английский язык english' },
-    { name: 'Физика', meta: 'Лаборатория · Пт · Кузнецов П. О.', emoji: '⚛️', bg: '#e9f1fc', kw: 'физика лаб' },
-    { name: 'Высшая математика', meta: 'Зачёт 28 июня · Иванов И. И.', emoji: '∑', bg: '#fdf1d2', kw: 'высшая математика вышка' },
-    { name: 'История России', meta: 'Лекция · Ср · Орлова Н. В.', emoji: '📜', bg: '#efeaf6', kw: 'история россии' },
-  ];
-
   function escapeHtml(str) {
     return String(str).replace(/[&<>"']/g, function (c) {
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  function hashStr(s) {
+    var h = 0;
+    s = String(s || '');
+    for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+    return h;
+  }
+
+  function colorFor(key) {
+    return PALETTE[hashStr(key) % PALETTE.length];
+  }
+
+  function emojiFor(key) {
+    return SUBJECT_EMOJI[hashStr(key) % SUBJECT_EMOJI.length];
+  }
+
+  function pluralPairs(n) {
+    var mod10 = n % 10, mod100 = n % 100;
+    if (mod100 >= 11 && mod100 <= 14) return n + ' пар';
+    if (mod10 === 1) return n + ' пара';
+    if (mod10 >= 2 && mod10 <= 4) return n + ' пары';
+    return n + ' пар';
+  }
+
+  // ---- даты/время (всё в Europe/Moscow) ------------------------------------
+  function mskKey(dateOrIso) {
+    var d = dateOrIso instanceof Date ? dateOrIso : new Date(dateOrIso);
+    return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Moscow' }).format(d); // YYYY-MM-DD
+  }
+
+  function addDaysToKey(key, days) {
+    var d = new Date(key + 'T00:00:00Z');
+    d.setUTCDate(d.getUTCDate() + days);
+    return d.toISOString().slice(0, 10);
+  }
+
+  function weekdayIndexOfKey(key) {
+    var d = new Date(key + 'T00:00:00Z');
+    return (d.getUTCDay() + 6) % 7; // Monday=0 ... Sunday=6
+  }
+
+  function keyParts(key) {
+    var p = key.split('-');
+    return { y: +p[0], m: +p[1], d: +p[2] };
+  }
+
+  function fmtTime(iso) {
+    var d = new Date(iso);
+    return new Intl.DateTimeFormat('ru-RU', { timeZone: 'Europe/Moscow', hour: '2-digit', minute: '2-digit' }).format(d);
+  }
+
+  function fmtDateLong(key) {
+    var p = keyParts(key);
+    return p.d + ' ' + MONTHS_RU[p.m - 1];
+  }
+
+  // ---- сеть -----------------------------------------------------------------
+  function apiGet(path) {
+    return fetch(path, { headers: { 'x-init-data': INIT_DATA } }).then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
     });
   }
 
@@ -147,25 +173,6 @@
     }
   }
 
-  function go(screen) {
-    haptic('light');
-    state.screen = screen;
-    syncBackButton();
-    render();
-  }
-
-  function openDay(i) {
-    haptic('light');
-    state.screen = 'day';
-    state.selectedDay = i;
-    syncBackButton();
-    render();
-  }
-
-  function back() {
-    go(state.screen === 'day' ? 'week' : 'home');
-  }
-
   function onClose() {
     try { if (tg && tg.close) tg.close(); } catch (e) {}
   }
@@ -182,14 +189,196 @@
     notify(name + '\n\n' + meta);
   }
 
-  window.go = go;
-  window.openDay = openDay;
-  window.back = back;
-  window.onClose = onClose;
   window.onMenuClick = onMenuClick;
   window.onYandexClick = onYandexClick;
   window.onSubjectTap = onSubjectTap;
 
+  // ---- маппинг ответов API в форму экранов -----------------------------------
+  function toLesson(ev) {
+    var c = colorFor(ev.discipline_name);
+    return {
+      time: fmtTime(ev.starts_at), end: fmtTime(ev.ends_at),
+      subject: ev.discipline_name, room: ev.room || '—', teacher: ev.teacher || '—',
+      type: ev.kind || 'Занятие', accent: c.accent, bg: c.bg,
+      _key: mskKey(ev.starts_at),
+    };
+  }
+
+  function buildToday(events) {
+    var lessons = events.map(toLesson).sort(function (a, b) { return a.time < b.time ? -1 : 1; });
+    return { status: 'loaded', lessons: lessons };
+  }
+
+  function buildWeek(events) {
+    var lessons = events.map(toLesson);
+    var todayKey = mskKey(new Date());
+    var mondayKey = addDaysToKey(todayKey, -weekdayIndexOfKey(todayKey));
+    var days = [];
+    for (var i = 0; i < 6; i++) { // Пн–Сб
+      var key = addDaysToKey(mondayKey, i);
+      var dayLessons = lessons.filter(function (l) { return l._key === key; })
+        .sort(function (a, b) { return a.time < b.time ? -1 : 1; });
+      var c = colorFor(key);
+      var p = keyParts(key);
+      days.push({
+        key: key, num: String(p.d).padStart(2, '0'), dow: WEEKDAY_SHORT[i], name: WEEKDAY_LONG[i],
+        date: fmtDateLong(key),
+        range: dayLessons.length ? (dayLessons[0].time + ' – ' + dayLessons[dayLessons.length - 1].end) : 'занятий нет',
+        count: dayLessons.length ? pluralPairs(dayLessons.length) : 'выходной',
+        accent: dayLessons.length ? c.accent : '#9aa3b1', bg: dayLessons.length ? c.bg : '#eef1f5',
+        opacity: dayLessons.length ? '1' : '0.6', lessons: dayLessons,
+      });
+    }
+    var total = days.reduce(function (s, d) { return s + d.lessons.length; }, 0);
+    var p0 = keyParts(days[0].key), p5 = keyParts(days[5].key);
+    var subtitle = p0.d + ' – ' + p5.d + ' ' + MONTHS_RU[p5.m - 1] + ' · ' + (total ? pluralPairs(total) : 'занятий нет');
+    return { status: 'loaded', days: days, subtitle: subtitle };
+  }
+
+  function buildExams(data) {
+    var now = new Date();
+    var items = [];
+    (data.events || []).forEach(function (e) {
+      var d = new Date(e.starts_at);
+      items.push({
+        date: d, subject: e.discipline_name, type: e.kind || 'Зачёт',
+        sub: (e.teacher || '—') + (e.room ? ', ауд. ' + e.room : ''),
+      });
+    });
+    (data.deadlines || []).forEach(function (dl) {
+      if (!dl.due_at) return;
+      var d = new Date(dl.due_at);
+      items.push({
+        date: d, subject: dl.discipline_name || '—', type: dl.work_type || 'Дедлайн',
+        sub: dl.raw_quote ? ('«' + dl.raw_quote.slice(0, 60) + '»') : 'из группового чата',
+      });
+    });
+    items.sort(function (a, b) { return a.date - b.date; });
+    items.forEach(function (it) {
+      var c = colorFor(it.subject);
+      it.accent = c.accent; it.bg = c.bg;
+      it.day = String(it.date.getUTCDate()).padStart(2, '0');
+      it.month = MONTHS_SHORT_RU[it.date.getUTCMonth()];
+      var diffDays = Math.ceil((it.date - now) / 86400000);
+      it.left = diffDays < 0 ? 'прошло' : (diffDays === 0 ? 'сегодня' : diffDays + ' дн');
+    });
+    var future = items.filter(function (it) { return it.date >= now; });
+    var subtitle = items.length
+      ? (items.length + ' ' + (items.length === 1 ? 'событие' : 'событий') +
+         (future.length ? ' · ближайшее через ' + future[0].left : ''))
+      : 'пока ничего не запланировано';
+    return { status: 'loaded', items: items, subtitle: subtitle };
+  }
+
+  function buildSubjects(data) {
+    var byName = {};
+    (data.events || []).forEach(function (e) {
+      var key = e.discipline_name;
+      if (!key) return;
+      if (!byName[key]) byName[key] = { name: key, kinds: [], weekdays: [], teacher: '', deadline: null };
+      var entry = byName[key];
+      if (e.kind && entry.kinds.indexOf(e.kind) === -1) entry.kinds.push(e.kind);
+      var wd = WEEKDAY_SHORT[weekdayIndexOfKey(mskKey(e.starts_at))];
+      var wdCap = wd.charAt(0).toUpperCase() + wd.slice(1);
+      if (entry.weekdays.indexOf(wdCap) === -1) entry.weekdays.push(wdCap);
+      if (!entry.teacher && e.teacher) entry.teacher = e.teacher;
+    });
+    (data.deadlines || []).forEach(function (dl) {
+      var key = dl.discipline_name;
+      if (!key) return;
+      if (!byName[key]) byName[key] = { name: key, kinds: [], weekdays: [], teacher: '', deadline: null };
+      if (dl.due_at) byName[key].deadline = { work_type: dl.work_type || 'Дедлайн', due_at: dl.due_at };
+    });
+    var items = Object.keys(byName).map(function (name) {
+      var e = byName[name];
+      var c = colorFor(name);
+      var meta;
+      if (e.deadline) {
+        var d = new Date(e.deadline.due_at);
+        meta = e.deadline.work_type + ' ' + d.getUTCDate() + ' ' + MONTHS_RU[d.getUTCMonth()] +
+          (e.teacher ? ' · ' + e.teacher : '');
+      } else {
+        meta = (e.kinds.join(', ') || 'Занятие') +
+          (e.weekdays.length ? ' · ' + e.weekdays.join(', ') : '') +
+          (e.teacher ? ' · ' + e.teacher : '');
+      }
+      return { name: name, meta: meta, emoji: emojiFor(name), bg: c.bg };
+    });
+    items.sort(function (a, b) { return a.name.localeCompare(b.name, 'ru'); });
+    return { status: 'loaded', items: items };
+  }
+
+  // ---- навигация --------------------------------------------------------------
+  function setLoadingScreen() {
+    document.getElementById('screen').innerHTML =
+      '<div style="display: flex; justify-content: center; padding: 70px 0;">' +
+        '<div style="color: #aab2c0; font-size: 14px;">Загрузка…</div>' +
+      '</div>';
+  }
+
+  function errorScreenHtml(retryScreen) {
+    return '<div style="text-align: center; padding: 50px 20px; color: #8a93a3;">' +
+      '<div style="font-size: 32px;">⚠️</div>' +
+      '<div style="font-size: 14px; margin-top: 10px; line-height: 1.4;">Не удалось загрузить данные.<br>Открой мини-апп из бота и проверь соединение.</div>' +
+      '<div onclick="go(' + JSON.stringify(retryScreen) + ')" style="display: inline-block; margin-top: 14px; background: #fff; border-radius: 14px; padding: 9px 16px; font-size: 13.5px; font-weight: 600; color: #2f86ff; cursor: pointer;">Повторить</div>' +
+    '</div>';
+  }
+
+  async function loadScreenData(screen) {
+    try {
+      if (screen === 'today') {
+        var events = await apiGet('/api/schedule/today');
+        state.today = buildToday(events);
+      } else if (screen === 'week') {
+        var wevents = await apiGet('/api/schedule/week');
+        state.week = buildWeek(wevents);
+      } else if (screen === 'exams') {
+        var edata = await apiGet('/api/exams');
+        state.exams = buildExams(edata);
+      } else if (screen === 'search') {
+        var sdata = await apiGet('/api/subjects');
+        state.subjects = buildSubjects(sdata);
+      }
+    } catch (e) {
+      if (screen === 'today') state.today = { status: 'error', lessons: [] };
+      else if (screen === 'week') state.week = { status: 'error', days: [], subtitle: '' };
+      else if (screen === 'exams') state.exams = { status: 'error', items: [], subtitle: '' };
+      else if (screen === 'search') state.subjects = { status: 'error', items: [] };
+    }
+  }
+
+  async function go(screen) {
+    haptic('light');
+    state.screen = screen;
+    syncBackButton();
+    renderHeaderAndNav();
+    var needsData = { today: 1, week: 1, exams: 1, search: 1 }[screen];
+    if (needsData) {
+      setLoadingScreen();
+      await loadScreenData(screen);
+    }
+    renderScreenContent();
+  }
+
+  function openDay(i) {
+    haptic('light');
+    state.screen = 'day';
+    state.selectedDay = i;
+    syncBackButton();
+    renderHeaderAndNav();
+    renderScreenContent();
+  }
+
+  function back() {
+    go(state.screen === 'day' ? 'week' : 'home');
+  }
+
+  window.go = go;
+  window.openDay = openDay;
+  window.back = back;
+  window.onClose = onClose;
+
+  // ---- разметка экранов ---------------------------------------------------
   function lessonCardHtml(l) {
     return '' +
       '<div style="background: #fff; border-radius: 20px; padding: 14px; display: flex; gap: 13px; box-shadow: 0 1px 2px rgba(20,30,60,0.04);">' +
@@ -207,6 +396,13 @@
           '</div>' +
         '</div>' +
       '</div>';
+  }
+
+  function emptyStateHtml(emoji, text) {
+    return '<div style="background: #eef1f5; border-radius: 18px; padding: 28px 16px; text-align: center;">' +
+      '<div style="font-size: 32px;">' + emoji + '</div>' +
+      '<div style="font-size: 14px; color: #8a93a3; font-weight: 600; margin-top: 8px;">' + escapeHtml(text) + '</div>' +
+    '</div>';
   }
 
   function renderHeaderLeft() {
@@ -383,32 +579,39 @@
   }
 
   function renderToday() {
+    if (state.today.status === 'error') return errorScreenHtml('today');
     var html = '<div class="ub-screen" style="display: flex; flex-direction: column; gap: 12px;">' +
       '<div style="display: flex; align-items: center; justify-content: space-between; padding: 4px 4px 0;">' +
         '<div>' +
           '<div style="font-size: 26px; font-weight: 800; color: #161e33; letter-spacing: -0.4px;">Сегодня</div>' +
-          '<div style="font-size: 14px; color: #8a93a3; margin-top: 2px;">вторник, 17 июня · 4 пары</div>' +
+          '<div style="font-size: 14px; color: #8a93a3; margin-top: 2px;">' + (state.today.lessons.length ? pluralPairs(state.today.lessons.length) : 'занятий нет') + '</div>' +
         '</div>' +
         '<div style="width: 46px; height: 46px; border-radius: 50%; background: #e6f0fe; display: flex; align-items: center; justify-content: center;">' +
           '<svg width="24" height="24" viewBox="0 0 24 24" fill="none"><rect x="3" y="5" width="18" height="16" rx="4" stroke="#2f86ff" stroke-width="2"/><path d="M3 9h18M8 3v4M16 3v4" stroke="#2f86ff" stroke-width="2" stroke-linecap="round"/></svg>' +
         '</div>' +
       '</div>';
-    for (var i = 0; i < todayLessons.length; i++) html += lessonCardHtml(todayLessons[i]);
-    html += '<div style="background: #e4f5ea; border-radius: 18px; padding: 14px 16px; display: flex; align-items: center; gap: 10px;">' +
-      '<span style="font-size: 20px;">🎉</span>' +
-      '<div style="font-size: 13.5px; color: #2c7a48; font-weight: 600; line-height: 1.35;">Это всё на сегодня. Дальше — заслуженный отдых!</div>' +
-    '</div></div>';
+    if (state.today.lessons.length === 0) {
+      html += emptyStateHtml('🎉', 'Сегодня пар нет. Если расписание не привязано — используй /link у бота.');
+    } else {
+      for (var i = 0; i < state.today.lessons.length; i++) html += lessonCardHtml(state.today.lessons[i]);
+      html += '<div style="background: #e4f5ea; border-radius: 18px; padding: 14px 16px; display: flex; align-items: center; gap: 10px;">' +
+        '<span style="font-size: 20px;">🎉</span>' +
+        '<div style="font-size: 13.5px; color: #2c7a48; font-weight: 600; line-height: 1.35;">Это всё на сегодня. Дальше — заслуженный отдых!</div>' +
+      '</div>';
+    }
+    html += '</div>';
     return html;
   }
 
   function renderWeek() {
+    if (state.week.status === 'error') return errorScreenHtml('week');
     var html = '<div class="ub-screen" style="display: flex; flex-direction: column; gap: 12px;">' +
       '<div style="padding: 4px 4px 0;">' +
         '<div style="font-size: 26px; font-weight: 800; color: #161e33; letter-spacing: -0.4px;">Неделя</div>' +
-        '<div style="font-size: 14px; color: #8a93a3; margin-top: 2px;">16 – 21 июня · 23 пары</div>' +
+        '<div style="font-size: 14px; color: #8a93a3; margin-top: 2px;">' + escapeHtml(state.week.subtitle) + '</div>' +
       '</div>';
-    for (var i = 0; i < weekData.length; i++) {
-      var d = weekData[i];
+    for (var i = 0; i < state.week.days.length; i++) {
+      var d = state.week.days[i];
       html += '<div onclick="openDay(' + i + ')" style="background: #fff; border-radius: 20px; padding: 14px 16px; box-shadow: 0 1px 2px rgba(20,30,60,0.04); opacity: ' + d.opacity + '; cursor: pointer;">' +
         '<div style="display: flex; align-items: center; justify-content: space-between; gap: 10px;">' +
           '<div style="display: flex; align-items: center; gap: 11px; min-width: 0;">' +
@@ -418,7 +621,7 @@
             '</div>' +
             '<div style="min-width: 0;">' +
               '<div style="font-size: 15.5px; font-weight: 700; color: #1b2440;">' + d.name + '</div>' +
-              '<div style="font-size: 12.5px; color: #9aa3b1; margin-top: 1px;">' + d.range + '</div>' +
+              '<div style="font-size: 12.5px; color: #9aa3b1; margin-top: 1px;">' + escapeHtml(d.range) + '</div>' +
             '</div>' +
           '</div>' +
           '<div style="display: flex; align-items: center; gap: 8px; flex-shrink: 0;">' +
@@ -433,13 +636,13 @@
   }
 
   function renderDay() {
-    var sd = weekData[state.selectedDay] || weekData[0];
-    var dayCount = sd.lessons.length ? sd.count : 'выходной';
+    var sd = state.week.days[state.selectedDay];
+    if (!sd) return errorScreenHtml('week');
     var html = '<div class="ub-screen" style="display: flex; flex-direction: column; gap: 12px;">' +
       '<div style="display: flex; align-items: center; justify-content: space-between; padding: 4px 4px 0;">' +
         '<div>' +
           '<div style="font-size: 26px; font-weight: 800; color: #161e33; letter-spacing: -0.4px;">' + sd.name + '</div>' +
-          '<div style="font-size: 14px; color: #8a93a3; margin-top: 2px;">' + sd.date + ' · ' + dayCount + '</div>' +
+          '<div style="font-size: 14px; color: #8a93a3; margin-top: 2px;">' + escapeHtml(sd.date) + ' · ' + sd.count + '</div>' +
         '</div>' +
         '<div style="width: 46px; height: 46px; border-radius: 50%; background: ' + sd.bg + '; display: flex; flex-direction: column; align-items: center; justify-content: center;">' +
           '<span style="font-size: 16px; font-weight: 800; color: ' + sd.accent + '; line-height: 1;">' + sd.num + '</span>' +
@@ -447,33 +650,32 @@
         '</div>' +
       '</div>';
     for (var i = 0; i < sd.lessons.length; i++) html += lessonCardHtml(sd.lessons[i]);
-    if (sd.lessons.length === 0) {
-      html += '<div style="background: #eef1f5; border-radius: 18px; padding: 28px 16px; text-align: center;">' +
-        '<div style="font-size: 32px;">😴</div>' +
-        '<div style="font-size: 14px; color: #8a93a3; font-weight: 600; margin-top: 8px;">В этот день занятий нет — отдыхай!</div>' +
-      '</div>';
-    }
+    if (sd.lessons.length === 0) html += emptyStateHtml('😴', 'В этот день занятий нет — отдыхай!');
     html += '</div>';
     return html;
   }
 
   function renderExams() {
+    if (state.exams.status === 'error') return errorScreenHtml('exams');
     var html = '<div class="ub-screen" style="display: flex; flex-direction: column; gap: 12px;">' +
       '<div style="padding: 4px 4px 0;">' +
         '<div style="font-size: 26px; font-weight: 800; color: #161e33; letter-spacing: -0.4px;">Сессия</div>' +
-        '<div style="font-size: 14px; color: #8a93a3; margin-top: 2px;">5 событий · ближайшее через 6 дней</div>' +
+        '<div style="font-size: 14px; color: #8a93a3; margin-top: 2px;">' + escapeHtml(state.exams.subtitle) + '</div>' +
       '</div>';
-    for (var i = 0; i < exams.length; i++) {
-      var e = exams[i];
+    if (state.exams.items.length === 0) {
+      html += emptyStateHtml('🎓', 'Зачётов и экзаменов пока не видно.');
+    }
+    for (var i = 0; i < state.exams.items.length; i++) {
+      var e = state.exams.items[i];
       html += '<div style="background: #fff; border-radius: 20px; padding: 15px 16px; box-shadow: 0 1px 2px rgba(20,30,60,0.04); display: flex; align-items: center; gap: 13px;">' +
         '<div style="width: 52px; height: 56px; border-radius: 15px; background: ' + e.bg + '; display: flex; flex-direction: column; align-items: center; justify-content: center; flex-shrink: 0;">' +
           '<span style="font-size: 20px; font-weight: 800; color: ' + e.accent + '; line-height: 1;">' + e.day + '</span>' +
           '<span style="font-size: 11px; font-weight: 700; color: ' + e.accent + ';">' + e.month + '</span>' +
         '</div>' +
         '<div style="flex: 1; min-width: 0;">' +
-          '<div style="display: inline-flex; align-items: center; padding: 3px 9px; border-radius: 20px; background: ' + e.bg + '; font-size: 11.5px; font-weight: 700; color: ' + e.accent + ';">' + e.type + '</div>' +
-          '<div style="font-size: 16px; font-weight: 700; color: #1b2440; margin-top: 6px; line-height: 1.2;">' + e.subject + '</div>' +
-          '<div style="font-size: 13px; color: #8a93a3; margin-top: 3px;">' + e.teacher + ' · ' + e.time + '</div>' +
+          '<div style="display: inline-flex; align-items: center; padding: 3px 9px; border-radius: 20px; background: ' + e.bg + '; font-size: 11.5px; font-weight: 700; color: ' + e.accent + ';">' + escapeHtml(e.type) + '</div>' +
+          '<div style="font-size: 16px; font-weight: 700; color: #1b2440; margin-top: 6px; line-height: 1.2;">' + escapeHtml(e.subject) + '</div>' +
+          '<div style="font-size: 13px; color: #8a93a3; margin-top: 3px;">' + escapeHtml(e.sub) + '</div>' +
         '</div>' +
         '<div style="text-align: right; flex-shrink: 0;">' +
           '<div style="font-size: 15px; font-weight: 800; color: ' + e.accent + ';">' + e.left + '</div>' +
@@ -486,8 +688,13 @@
   }
 
   function searchResultsHtml() {
+    if (state.subjects.status === 'error') return errorScreenHtml('search');
     var q = state.query.trim().toLowerCase();
-    var filtered = q ? allSubjects.filter(function (x) { return (x.name + ' ' + x.kw).toLowerCase().indexOf(q) !== -1; }) : allSubjects;
+    var all = state.subjects.items;
+    var filtered = q ? all.filter(function (x) { return x.name.toLowerCase().indexOf(q) !== -1; }) : all;
+    if (all.length === 0) {
+      return emptyStateHtml('📭', 'Пока нет данных о предметах. Привяжи портал командой /link у бота.');
+    }
     if (q.length > 0 && filtered.length === 0) {
       return '<div style="text-align: center; padding: 40px 20px; color: #aab2c0;">' +
         '<div style="font-size: 34px;">🔍</div>' +
@@ -548,7 +755,7 @@
     '</div>';
   }
 
-  function renderBottomNav() {
+  function renderBottomNavHtml() {
     var s = state.screen;
     var homeColor = s === 'home' ? ACTIVE : IDLE;
     var todayColor = s === 'today' ? ACTIVE : IDLE;
@@ -573,14 +780,17 @@
       '</div>';
   }
 
-  function render() {
+  function renderHeaderAndNav() {
     var s = state.screen;
-    var sd = weekData[state.selectedDay] || weekData[0];
-
+    var sd = state.week.days[state.selectedDay];
     document.getElementById('header-left').innerHTML = renderHeaderLeft();
-    document.getElementById('header-title').textContent = s === 'day' ? sd.name : titles[s][0];
+    document.getElementById('header-title').textContent = (s === 'day' && sd) ? sd.name : titles[s][0];
     document.getElementById('header-subtitle').textContent = titles[s][1];
+    document.getElementById('bottomnav').innerHTML = renderBottomNavHtml();
+  }
 
+  function renderScreenContent() {
+    var s = state.screen;
     var html;
     if (s === 'home') html = renderHome();
     else if (s === 'today') html = renderToday();
@@ -589,8 +799,11 @@
     else if (s === 'exams') html = renderExams();
     else html = renderSearch();
     document.getElementById('screen').innerHTML = html;
+  }
 
-    document.getElementById('bottomnav').innerHTML = renderBottomNav();
+  function render() {
+    renderHeaderAndNav();
+    renderScreenContent();
   }
 
   document.addEventListener('DOMContentLoaded', function () {

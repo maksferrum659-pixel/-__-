@@ -160,3 +160,22 @@ def test_ask_question_survives_missing_group_chat_id_column(monkeypatch):
     asyncio.run(handlers_personal.on_ask_question(msg, state, _settings()))
     state.clear.assert_awaited_once()
     assert "Не удалось получить ответ" in msg.answer.call_args.args[0]
+
+
+def test_free_text_goes_to_ai_chat(monkeypatch):
+    fake_db = SimpleNamespace(
+        get_group_chat_id=lambda tid: None,
+        list_deadlines=lambda cid, only_open=True: [],
+        get_schedule=lambda tid, since, until: [],
+    )
+    monkeypatch.setattr(handlers_personal, "db", fake_db)
+    monkeypatch.setattr(handlers_personal.ai_chat, "answer_question", lambda *a, **kw: "Ответ ИИ")
+    msg = _msg(text="когда следующая физика?")
+    asyncio.run(handlers_personal.on_free_text(msg, _settings()))
+    assert msg.answer.call_args.args[0] == "Ответ ИИ"
+
+
+def test_free_text_handler_registered_last():
+    """on_free_text должен быть последним в роутере — иначе он перехватит команды/FSM-шаги."""
+    handlers = handlers_personal.router.observers["message"].handlers
+    assert handlers[-1].callback.__name__ == "on_free_text"

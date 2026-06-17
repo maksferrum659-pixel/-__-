@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from aiogram import F, Router
-from aiogram.filters import Command, CommandObject, CommandStart
+from aiogram.filters import Command, CommandObject, CommandStart, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (
@@ -111,7 +111,8 @@ async def cmd_start(message: Message) -> None:
         "📅 Расписание на сегодня и неделю\n"
         "🔍 Поиск по предмету — пары и дедлайны\n"
         "🎓 Зачёты и экзамены\n"
-        "🤖 Слушаю групповой чат и сам нахожу дедлайны\n\n"
+        "🤖 Слушаю групповой чат и сам нахожу дедлайны\n"
+        "💬 Можешь просто писать мне в свободной форме — отвечу на основе расписания и дедлайнов\n\n"
         "<b>Чтобы начать, нужно:</b>\n"
         "1️⃣ Выбрать свою группу\n"
         "2️⃣ Привязать логин/пароль от портала rr-edu.ranepa.ru\n"
@@ -352,10 +353,7 @@ async def btn_ask(message: Message, state: FSMContext) -> None:
     )
 
 
-@router.message(AskQuestion.waiting_question, F.chat.type == "private", F.text)
-async def on_ask_question(message: Message, state: FSMContext, settings: Settings) -> None:
-    await state.clear()
-    question = (message.text or "").strip()
+async def _answer_with_ai(message: Message, settings: Settings, question: str) -> None:
     thinking = await message.answer("Думаю…")
     try:
         tz = _tz(settings)
@@ -371,3 +369,18 @@ async def on_ask_question(message: Message, state: FSMContext, settings: Setting
         return
     await thinking.delete()
     await message.answer(answer)
+
+
+@router.message(AskQuestion.waiting_question, F.chat.type == "private", F.text)
+async def on_ask_question(message: Message, state: FSMContext, settings: Settings) -> None:
+    await state.clear()
+    await _answer_with_ai(message, settings, (message.text or "").strip())
+
+
+# --------------------------------------------------------------------------- #
+# Свободная переписка (личка, без активной FSM-стадии и не команда/кнопка) —
+# всё, что дошло сюда, не подошло ни одному более специфичному хендлеру выше.
+# --------------------------------------------------------------------------- #
+@router.message(StateFilter(None), F.chat.type == "private", F.text, ~F.text.startswith("/"))
+async def on_free_text(message: Message, settings: Settings) -> None:
+    await _answer_with_ai(message, settings, (message.text or "").strip())
