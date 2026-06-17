@@ -15,6 +15,7 @@ supabase>=2.0.0
 
 # Бот и планировщик (bot/)
 aiogram>=3.4,<4
+aiohttp-socks>=0.8            # SOCKS5-прокси для Telegram (bot/main.py)
 APScheduler>=3.10,<4
 
 # Конфигурация
