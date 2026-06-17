@@ -25,6 +25,7 @@ from aiogram.types import (
 )
 
 import db
+from core import ai_chat
 from core.deadline_extractor import extract_deadline
 from core.llm import GigaChatClient
 from core.security import encrypt_token
@@ -56,6 +57,11 @@ class DisciplineSearch(StatesGroup):
     waiting_name = State()
 
 
+class AskQuestion(StatesGroup):
+    """FSM вопроса к ИИ по данным группы."""
+    waiting_question = State()
+
+
 GROUPS = ["Группа 1", "Группа 2"]
 
 
@@ -68,6 +74,8 @@ def _commands_keyboard() -> ReplyKeyboardMarkup:
         keyboard=[
             [KeyboardButton(text="📅 Сегодня"), KeyboardButton(text="📆 Неделя")],
             [KeyboardButton(text="🎓 Зачёты"), KeyboardButton(text="🔍 По предмету")],
+            [KeyboardButton(text="📱 Мини апп"), KeyboardButton(text="💬 Задать вопрос")],
+            [KeyboardButton(text="🔄 Заново заполнить данные")],
         ],
         resize_keyboard=True,
         is_persistent=True,
@@ -310,6 +318,58 @@ async def on_discipline_name(message: Message, state: FSMContext, settings: Sett
     deadlines = db.list_deadlines(message.chat.id, only_open=True)
     deadlines = [d for d in deadlines if d.discipline_name and name.lower() in d.discipline_name.lower()]
     await message.answer(format_discipline(name, events, deadlines))
+
+
+@router.message(F.text == "📱 Мини апп", F.chat.type == "private")
+async def btn_miniapp(message: Message, settings: Settings) -> None:
+    if settings.mini_app_url:
+        kb = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(
+                text="📱 Открыть расписание",
+                web_app=WebAppInfo(url=settings.mini_app_url),
+            )
+        ]])
+        await message.answer("Нажми кнопку:", reply_markup=kb)
+    else:
+        await message.answer("Мини-приложение скоро будет готово! 🚀")
+
+
+@router.message(F.text == "🔄 Заново заполнить данные", F.chat.type == "private")
+async def btn_refill(message: Message) -> None:
+    current_group = db.get_academic_group(message.from_user.id)
+    await message.answer("Настройки:", reply_markup=_main_keyboard(current_group))
+    if not current_group:
+        await message.answer("Выбери свою группу:", reply_markup=_group_keyboard())
+
+
+@router.message(F.text == "💬 Задать вопрос", F.chat.type == "private")
+async def btn_ask(message: Message, state: FSMContext) -> None:
+    await state.set_state(AskQuestion.waiting_question)
+    await message.answer(
+        "Напиши вопрос — отвечу на основе расписания и дедлайнов группы.\n\n"
+        "Например: <i>«Что нужно сдать по психологии?»</i> или <i>«Когда следующий зачёт?»</i>"
+    )
+
+
+@router.message(AskQuestion.waiting_question, F.chat.type == "private", F.text)
+async def on_ask_question(message: Message, state: FSMContext, settings: Settings) -> None:
+    await state.clear()
+    question = (message.text or "").strip()
+    tz = _tz(settings)
+    now = datetime.now(tz)
+    chat_id = db.get_group_chat_id(message.from_user.id)
+    deadlines = db.list_deadlines(chat_id, only_open=True) if chat_id else []
+    schedule = db.get_schedule(message.from_user.id, now, now + timedelta(days=7))
+    thinking = await message.answer("Думаю…")
+    try:
+        answer = ai_chat.answer_question(question, _llm, deadlines=deadlines, schedule=schedule)
+    except Exception:
+        logger.exception("Ошибка ИИ-чата (user=%s)", message.from_user.id)
+        await thinking.delete()
+        await message.answer("Не удалось получить ответ от ИИ. Попробуй позже.")
+        return
+    await thinking.delete()
+    await message.answer(answer)
 
 
 # --------------------------------------------------------------------------- #
