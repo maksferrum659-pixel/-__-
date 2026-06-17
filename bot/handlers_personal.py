@@ -1,7 +1,7 @@
-"""Хендлеры команд и сообщений чата (aiogram 3.x).
+"""Хендлеры личного бота (@TimetableRRBot): команды, FSM, кнопки, ИИ-чат.
 
-Данные берём из `db` (не из портала напрямую). Дедлайны извлекаем через `core`.
-Привязка портала идёт через `parser` + `core.security`. Пароль НЕ логируем и НЕ храним.
+Данные берём из `db` (не из портала напрямую). Привязка портала идёт через
+`parser` + `core.security`. Пароль НЕ логируем и НЕ храним.
 """
 from __future__ import annotations
 
@@ -26,17 +26,15 @@ from aiogram.types import (
 
 import db
 from core import ai_chat
-from core.deadline_extractor import extract_deadline
 from core.llm import GigaChatClient
 from core.security import encrypt_token
 import parser
 
 from .config import Settings
 from .formatters import format_credits, format_day, format_discipline, format_week
-from .mappers import extraction_to_deadline
 
 logger = logging.getLogger(__name__)
-router = Router(name="bot")
+router = Router(name="personal")
 
 # Один экземпляр LLM-клиента на процесс (см. core.llm.GigaChatClient).
 _llm = GigaChatClient()
@@ -265,8 +263,9 @@ async def cmd_discipline(message: Message, command: CommandObject, settings: Set
     now = datetime.now(tz)
     events = db.get_schedule(message.from_user.id, now, now + timedelta(days=30))
     events = [e for e in events if name.lower() in e.discipline_name.lower()]
-    # Дедлайны групповые (по chat_id). В группе берём текущий чат.
-    deadlines = db.list_deadlines(message.chat.id, only_open=True) if message.chat.type != "private" else []
+    # Дедлайны групповые — берём чат, привязанный к пользователю групповым ботом.
+    chat_id = db.get_group_chat_id(message.from_user.id) if message.chat.type == "private" else message.chat.id
+    deadlines = db.list_deadlines(chat_id, only_open=True) if chat_id else []
     deadlines = [d for d in deadlines if d.discipline_name and name.lower() in d.discipline_name.lower()]
     await message.answer(format_discipline(name, events, deadlines))
 
@@ -278,7 +277,8 @@ async def cmd_credits(message: Message, settings: Settings) -> None:
     events = db.get_schedule(message.from_user.id, now, now + timedelta(days=120))
     control = {"зачёт", "зачет", "экзамен", "зачет с оценкой", "зачёт с оценкой", "дифференцированный зачёт", "дифференцированный зачет"}
     events = [e for e in events if e.kind and any(k in e.kind.lower() for k in control)]
-    deadlines = db.list_deadlines(message.chat.id, only_open=True) if message.chat.type != "private" else []
+    chat_id = db.get_group_chat_id(message.from_user.id) if message.chat.type == "private" else message.chat.id
+    deadlines = db.list_deadlines(chat_id, only_open=True) if chat_id else []
     deadlines = [d for d in deadlines if d.work_type and d.work_type.lower() in control]
     await message.answer(format_credits(events, deadlines))
 
@@ -315,7 +315,8 @@ async def on_discipline_name(message: Message, state: FSMContext, settings: Sett
     now = datetime.now(tz)
     events = db.get_schedule(message.from_user.id, now, now + timedelta(days=30))
     events = [e for e in events if name.lower() in e.discipline_name.lower()]
-    deadlines = db.list_deadlines(message.chat.id, only_open=True)
+    chat_id = db.get_group_chat_id(message.from_user.id)
+    deadlines = db.list_deadlines(chat_id, only_open=True) if chat_id else []
     deadlines = [d for d in deadlines if d.discipline_name and name.lower() in d.discipline_name.lower()]
     await message.answer(format_discipline(name, events, deadlines))
 
@@ -355,13 +356,13 @@ async def btn_ask(message: Message, state: FSMContext) -> None:
 async def on_ask_question(message: Message, state: FSMContext, settings: Settings) -> None:
     await state.clear()
     question = (message.text or "").strip()
-    tz = _tz(settings)
-    now = datetime.now(tz)
-    chat_id = db.get_group_chat_id(message.from_user.id)
-    deadlines = db.list_deadlines(chat_id, only_open=True) if chat_id else []
-    schedule = db.get_schedule(message.from_user.id, now, now + timedelta(days=7))
     thinking = await message.answer("Думаю…")
     try:
+        tz = _tz(settings)
+        now = datetime.now(tz)
+        chat_id = db.get_group_chat_id(message.from_user.id)
+        deadlines = db.list_deadlines(chat_id, only_open=True) if chat_id else []
+        schedule = db.get_schedule(message.from_user.id, now, now + timedelta(days=7))
         answer = ai_chat.answer_question(question, _llm, deadlines=deadlines, schedule=schedule)
     except Exception:
         logger.exception("Ошибка ИИ-чата (user=%s)", message.from_user.id)
@@ -370,26 +371,3 @@ async def on_ask_question(message: Message, state: FSMContext, settings: Setting
         return
     await thinking.delete()
     await message.answer(answer)
-
-
-# --------------------------------------------------------------------------- #
-# Приём сообщений группового чата → дедлайны (ИИ-поток)
-# --------------------------------------------------------------------------- #
-@router.message(F.chat.type.in_({"group", "supergroup"}), F.text)
-async def on_group_message(message: Message, settings: Settings) -> None:
-    extraction = extract_deadline(message.text, _llm, datetime.now(_tz(settings)).date())
-    deadline = extraction_to_deadline(
-        extraction,
-        chat_id=message.chat.id,
-        source_message_id=message.message_id,
-        confidence_threshold=settings.confidence_threshold,
-    )
-    if deadline is None:
-        return  # не дедлайн / низкая уверенность — молчим
-    db.upsert_deadline(deadline)  # дедуп по (chat_id, source_message_id)
-    logger.info("Сохранён дедлайн из чата %s (msg=%s)", message.chat.id, message.message_id)
-
-
-def register(router_root) -> None:
-    """Подключить этот роутер к диспетчеру/корневому роутеру."""
-    router_root.include_router(router)
