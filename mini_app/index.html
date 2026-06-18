@@ -186,19 +186,38 @@
     haptic('light');
   }
 
+  function showToast(message) {
+    var overlay = document.getElementById('modal-overlay');
+    overlay.innerHTML =
+      '<div style="position: fixed; left: 0; right: 0; bottom: 28px; display: flex; justify-content: center; z-index: 95; padding: 0 24px; pointer-events: none;">' +
+        '<div style="background: #1b2440; color: #fff; border-radius: 14px; padding: 12px 18px; font-size: 13.5px; font-weight: 600; text-align: center; line-height: 1.35; box-shadow: 0 6px 20px rgba(0,0,0,0.25); animation: ub-modal-in 0.22s cubic-bezier(.2,.7,.3,1); max-width: 100%;">' + escapeHtml(message) + '</div>' +
+      '</div>';
+    overlay.style.display = 'block';
+    setTimeout(function () {
+      overlay.style.display = 'none';
+      overlay.innerHTML = '';
+    }, 2400);
+  }
+
   function onYandexClick() {
     haptic('light');
-    apiGet('/api/calendar-link').then(function (data) {
-      copyToClipboard(data.webcal_url).then(function (ok) {
-        if (ok) {
-          notify('Ссылка на календарь скопирована 📋\nВ Яндекс.Календаре: Добавить календарь → По ссылке.');
-        } else {
+    try {
+      apiGet('/api/calendar-link').then(function (data) {
+        copyToClipboard(data.webcal_url).then(function (ok) {
+          if (ok) {
+            showToast('Ссылка на календарь скопирована 📋 Вставь её в Яндекс.Календаре: Добавить календарь → По ссылке.');
+          } else {
+            showCalendarModal(data.webcal_url);
+          }
+        }).catch(function () {
           showCalendarModal(data.webcal_url);
-        }
+        });
+      }).catch(function () {
+        showToast('Не удалось получить ссылку на календарь. Попробуй снова.');
       });
-    }).catch(function () {
-      notify('Не удалось получить ссылку на календарь. Открой мини-апп из бота и попробуй снова.');
-    });
+    } catch (e) {
+      showToast('Не удалось получить ссылку на календарь. Попробуй снова.');
+    }
   }
 
   function copyToClipboard(text) {
