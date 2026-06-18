@@ -14,9 +14,9 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 
 try:
     from dotenv import load_dotenv
@@ -25,6 +25,7 @@ except ModuleNotFoundError:
     pass
 
 import db
+from ical.generator import events_to_ics
 
 _TZ = ZoneInfo("Europe/Moscow")
 _HERE = Path(__file__).parent
@@ -140,6 +141,36 @@ def mark_undone(deadline_id: str, x_init_data: str = Header(..., alias="x-init-d
     telegram_id = _verify_init_data(x_init_data)
     db.mark_deadline_done(telegram_id, deadline_id, done=False)
     return {"ok": True}
+
+
+# ── Яндекс-календарь (ICS-подписка) ─────────────────────────────────────────
+
+@app.get("/api/calendar-link")
+def get_calendar_link(request: Request, x_init_data: str = Header(..., alias="x-init-data")):
+    telegram_id = _verify_init_data(x_init_data)
+    token = db.get_or_create_ical_token(telegram_id)
+    https_url = f"{str(request.base_url).rstrip('/')}/ical/{token}.ics"
+    webcal_url = https_url.replace("https://", "webcal://").replace("http://", "webcal://")
+    return {"https_url": https_url, "webcal_url": webcal_url}
+
+
+@app.get("/ical/{token}.ics")
+def get_ical(token: str) -> Response:
+    telegram_id = db.get_telegram_id_by_ical_token(token)
+    if telegram_id is None:
+        raise HTTPException(status_code=404, detail="Токен не найден")
+
+    now = datetime.now(_TZ)
+    events = db.get_schedule(telegram_id, now - timedelta(days=14), now + timedelta(days=90))
+    chat_id = db.get_group_chat_id(telegram_id)
+    deadlines = db.list_deadlines(chat_id, only_open=True) if chat_id else []
+
+    content = events_to_ics(events, deadlines)
+    return Response(
+        content=content,
+        media_type="text/calendar; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="schedule.ics"'},
+    )
 
 
 # ── Фронтенд ──────────────────────────────────────────────────────────────────

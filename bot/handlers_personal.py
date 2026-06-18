@@ -92,8 +92,24 @@ def _main_keyboard(current_group: str | None = None) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text=group_label, callback_data="do_group")],
         [InlineKeyboardButton(text="🔗 Привязать портал РАНХИГС", callback_data="do_link")],
         [InlineKeyboardButton(text="📧 Указать Яндекс-почту", callback_data="do_email")],
+        [InlineKeyboardButton(text="📅 Подключить календарь", callback_data="do_calendar")],
         [InlineKeyboardButton(text="📱 Мини-приложение (скоро)", callback_data="miniapp_soon")],
     ])
+
+
+def _calendar_link_message(telegram_id: int, settings: Settings) -> str:
+    if not settings.mini_app_url:
+        return "Календарь скоро будет готов! 🚀"
+    token = db.get_or_create_ical_token(telegram_id)
+    https_url = f"{settings.mini_app_url.rstrip('/')}/ical/{token}.ics"
+    webcal_url = https_url.replace("https://", "webcal://").replace("http://", "webcal://")
+    return (
+        "📅 <b>Подписка на календарь</b>\n\n"
+        "Скопируй ссылку и добавь в Яндекс.Календарь:\n"
+        "<b>Добавить календарь → По ссылке</b>\n\n"
+        f"<code>{webcal_url}</code>\n\n"
+        "Работает также с Google Calendar, Apple Calendar, Outlook."
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -111,6 +127,7 @@ async def cmd_start(message: Message) -> None:
         "📅 Расписание на сегодня и неделю\n"
         "🔍 Поиск по предмету — пары и дедлайны\n"
         "🎓 Зачёты и экзамены\n"
+        "📅 Подписка на Яндекс-календарь (и любой другой) — /calendar\n"
         "🤖 Слушаю групповой чат и сам нахожу дедлайны\n"
         "💬 Можешь просто писать мне в свободной форме — отвечу на основе расписания и дедлайнов\n\n"
         "<b>Чтобы начать, нужно:</b>\n"
@@ -144,6 +161,12 @@ async def on_cb_email(callback: CallbackQuery, state: FSMContext) -> None:
         "Пришли свой Яндекс-адрес, чтобы я мог отправить ссылку на подписку календаря:\n"
         "<code>example@yandex.ru</code>"
     )
+
+
+@router.callback_query(lambda c: c.data == "do_calendar")
+async def on_cb_calendar(callback: CallbackQuery, settings: Settings) -> None:
+    await callback.answer()
+    await callback.message.answer(_calendar_link_message(callback.from_user.id, settings))
 
 
 @router.callback_query(lambda c: c.data == "miniapp_soon")
@@ -181,17 +204,20 @@ async def on_cb_group_selected(callback: CallbackQuery) -> None:
 
 
 @router.message(YandexEmail.waiting_email, F.chat.type == "private", F.text)
-async def on_yandex_email(message: Message, state: FSMContext) -> None:
+async def on_yandex_email(message: Message, state: FSMContext, settings: Settings) -> None:
     await state.clear()
     email = (message.text or "").strip()
     if "@" not in email or "." not in email.split("@")[-1]:
         await message.answer("Не похоже на почту. Попробуй ещё раз — нажми «Указать Яндекс-почту».")
         return
     db.save_yandex_email(message.from_user.id, email)
-    await message.answer(
-        f"✅ Почта <code>{email}</code> сохранена.\n"
-        "Когда подключим календарь — пришлю ссылку на подписку."
-    )
+    await message.answer(f"✅ Почта <code>{email}</code> сохранена.")
+    await message.answer(_calendar_link_message(message.from_user.id, settings))
+
+
+@router.message(Command("calendar"), F.chat.type == "private")
+async def cmd_calendar(message: Message, settings: Settings) -> None:
+    await message.answer(_calendar_link_message(message.from_user.id, settings))
 
 
 @router.message(Command("link"), F.chat.type == "private")

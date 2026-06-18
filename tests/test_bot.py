@@ -179,3 +179,32 @@ def test_free_text_handler_registered_last():
     """on_free_text должен быть последним в роутере — иначе он перехватит команды/FSM-шаги."""
     handlers = handlers_personal.router.observers["message"].handlers
     assert handlers[-1].callback.__name__ == "on_free_text"
+
+
+def test_cmd_calendar_sends_webcal_link(monkeypatch):
+    fake_db = SimpleNamespace(get_or_create_ical_token=lambda tid: "abc123")
+    monkeypatch.setattr(handlers_personal, "db", fake_db)
+    msg = _msg()
+    asyncio.run(handlers_personal.cmd_calendar(msg, _settings(mini_app_url="https://bot.example.com")))
+    text = msg.answer.call_args.args[0]
+    assert "webcal://bot.example.com/ical/abc123.ics" in text
+
+
+def test_cmd_calendar_without_mini_app_url(monkeypatch):
+    msg = _msg()
+    asyncio.run(handlers_personal.cmd_calendar(msg, _settings(mini_app_url="")))
+    assert "скоро будет" in msg.answer.call_args.args[0]
+
+
+def test_yandex_email_sends_calendar_link_after_saving(monkeypatch):
+    fake_db = SimpleNamespace(
+        save_yandex_email=lambda tid, email: None,
+        get_or_create_ical_token=lambda tid: "abc123",
+    )
+    monkeypatch.setattr(handlers_personal, "db", fake_db)
+    state = AsyncMock()
+    msg = _msg(text="student@yandex.ru")
+    asyncio.run(handlers_personal.on_yandex_email(msg, state, _settings(mini_app_url="https://bot.example.com")))
+    assert msg.answer.await_count == 2
+    assert "сохранена" in msg.answer.call_args_list[0].args[0]
+    assert "webcal://" in msg.answer.call_args_list[1].args[0]

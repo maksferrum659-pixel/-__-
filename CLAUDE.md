@@ -20,8 +20,9 @@ APScheduler ──▶ sync расписания (parser↔db) + напомина
 | `parser/` | Логин на портал + `fetch_schedule` → `ScheduleEvent` (чистая библиотека) | Максим |
 | `db/` | Публичный API доступа к Supabase (§6), миграции, RLS | Настя |
 | `bot/` | **два независимых бота** в одном процессе (`bot/main.py`): `handlers_personal` (команды, FSM, ИИ-чат, планировщик) + `handlers_group` (мониторинг чата) | Егор |
-| `mini_app/` | Telegram Mini App: FastAPI-сервер + `index.html` (отдельный процесс) | Настя П |
-| `tests/` | `test_parser` (офлайн), `test_bot` (офлайн, моки), `test_db` (интеграция) |  |
+| `mini_app/` | Telegram Mini App: FastAPI-сервер (расписание, зачёты, поиск, `/ical`, `/api/calendar-link`) + `index.html` | Настя П |
+| `ical/` | `generator.events_to_ics` — чистая конвертация расписания/дедлайнов в iCalendar (RFC 5545) | Марина |
+| `tests/` | `test_parser`, `test_bot`, `test_calendar` (офлайн, моки), `test_db` (интеграция) |  |
 
 Границы зон по §9 контракта: каждый правит свою папку; `shared/`, `core/`,
 `db/migrations/`, `CONTRACT.md` — только по согласованию (PR `[contract]`).
@@ -37,10 +38,10 @@ NO_PROXY='*' .venv\Scripts\python.exe -m pip install -r requirements.txt
 
 ## Тесты
 ```powershell
-NO_PROXY='*' .venv\Scripts\python.exe -m pytest tests/test_parser.py tests/test_bot.py  # офлайн
-.venv\Scripts\python.exe -m pytest tests/test_db.py                                       # ИНТЕГРАЦИЯ с Supabase
+NO_PROXY='*' .venv\Scripts\python.exe -m pytest tests/test_parser.py tests/test_bot.py tests/test_calendar.py  # офлайн
+.venv\Scripts\python.exe -m pytest tests/test_db.py                                                              # ИНТЕГРАЦИЯ с Supabase
 ```
-Офлайн-набор: **17/17 зелёных**. `test_db.py` ходит в реальную Supabase (нужны миграции и `SUPABASE_*`).
+Офлайн-набор: **33/33 зелёных**. `test_db.py` ходит в реальную Supabase (нужны миграции и `SUPABASE_*`).
 
 ## Конвенции
 - Секреты только в `.env` (gitignored). Пароль портала не логируем и не храним —
@@ -75,28 +76,38 @@ NO_PROXY='*' .venv\Scripts\python.exe -m pytest tests/test_parser.py tests/test_
 - **Дедлайны из группы**: сообщения чата → GigaChat (`core.extract_deadline`) → `db.upsert_deadline`
   (дедуп по `chat_id`+`source_message_id`). В логах: дедлайны из чата `-1002022477372` сохраняются.
 - **Онбординг** `/start`, привязка портала `/link`, выбор группы, клавиатура команд.
+- **Свободный ИИ-чат**: в личке можно писать без кнопки — `handlers_personal.on_free_text`
+  (catch-all, регистрируется последним в роутере) уходит в GigaChat с контекстом расписания/дедлайнов.
+  `core.ai_chat` передаёт модели реальную текущую дату/время (раньше GigaChat угадывал год по своим
+  тренировочным данным — например, называл 2023).
+- **Mini App с реальными данными**: `mini_app/index.html` больше не демо — все экраны (Сегодня/
+  Неделя/День/Сессия/Поиск) тянут `/api/*` через `fetch` с заголовком `x-init-data`. Подключена через
+  Cloudflare quick tunnel (`cloudflared tunnel --url http://localhost:8000`, без аккаунта) — `MINI_APP_URL`
+  в `.env` указывает на текущий `https://*.trycloudflare.com`. **Это временный адрес**: меняется при
+  каждом перезапуске туннеля, для постоянной работы нужен именованный ngrok-туннель или нормальный хостинг.
+- **Подписка на календарь** (`/calendar`, кнопка «📅 Подключить календарь», карточка в Mini App):
+  `ical.generator.events_to_ics` + эндпоинт `mini_app/server.py:/ical/{token}.ics` отдают iCalendar-фид
+  по уникальному `users.ical_token`; работает с Яндекс/Google/Apple-календарём через `webcal://`.
 
 ### ❌ Известные проблемы
-1. **ИИ-чат «💬 Задать вопрос» — частично пофикшено.** `bot/handlers_personal.py:on_ask_question`
-   теперь оборачивает `db.get_group_chat_id()` в тот же `try/except`, что и вызов ИИ — при
-   отсутствии колонки пользователь получает мягкое «Не удалось получить ответ», а не тишину/краш.
-   Но **функционально** ответ будет неполным (без дедлайнов группы), пока колонка не появится
-   в реальной Supabase: миграция `006_add_group_chat_id.sql` теперь в `develop`, но
-   **применить её в Supabase ещё нужно** (см. ниже).
-2. **Mini App не работает.** `mini_app/server.py` — отдельный FastAPI-процесс, `bot.main`
-   его НЕ поднимает; в `.env` пусты `MINI_APP_URL`/`MINI_APP_PORT`. Для WebApp-кнопки нужен
-   публичный HTTPS (ngrok) + запущенный сервер. Делала Настя П (ветка `nastya-p`) — не доинтегрировано.
-3. **`telegram_id=999999999`** — битый/устаревший токен в `users`, при синке даёт
+1. **ИИ-чат может отвечать без дедлайнов группы**, если `users.group_chat_id` не заполнена —
+   `on_ask_question`/`on_free_text` оборачивают `db.get_group_chat_id()` в `try/except`, поэтому не
+   крашатся, но контекст будет неполным, пока миграция `006_add_group_chat_id.sql` не применена
+   в реальной Supabase (см. таблицу миграций ниже).
+2. **`telegram_id=999999999`** — битый/устаревший токен в `users`, при синке даёт
    `InvalidToken` (Fernet). Цикл его переживает (per-user `try/except`), но это шум в логах —
    запись стоит удалить (это тестовая строка от `test_db.py`).
-4. **Периодические `ServerDisconnectedError`** при поллинге Telegram через VPN — aiogram
+3. **Периодические `ServerDisconnectedError`** при поллинге Telegram через VPN — aiogram
    сам переподключается (`Connection established`), не критично.
+4. **`MINI_APP_URL` на Cloudflare quick tunnel — нестабильный адрес.** Если процесс `cloudflared`
+   или `mini_app/server.py` остановится (закрыли окно, перезагрузка) — Mini App и `/calendar`
+   сломаются, пока не поднять туннель заново и не обновить `.env`.
 
 ### Миграции Supabase (реальное состояние)
 | Миграция | В `develop`? | Применена в БД | Примечание |
 |---|---|---|---|
 | 001_init.sql | ✅ | ✅ | базовые таблицы |
-| 002_add_ical_token.sql | ❌ (на `calendar`) | ? | для ICS-экспорта |
+| 002_add_ical_token.sql | ✅ (добавлена при интеграции календаря) | ⚠️ **проверить/применить** | `users.ical_token` для `/ical/{token}.ics`; `IF NOT EXISTS` — безопасно применить повторно, если уже была |
 | 003_add_yandex_email.sql | ✅ | ✅ | |
 | 004_add_academic_group.sql | ✅ | ✅ | |
 | 005_add_group_messages.sql | ❌ (на `marina`) | ❌ | история группы для ИИ-чата (расширение, не блокер) |
@@ -114,17 +125,23 @@ NO_PROXY='*' .venv\Scripts\python.exe -m pytest tests/test_parser.py tests/test_
 ### Ветки
 | Ветка | Статус | Что содержит |
 |---|---|---|
-| `develop` | ✅ запускается, два бота разделены | собранный проект (bot×2+parser+db+core+shared+mini_app) |
-| `calendar` | готова к PR → develop | ICS-экспорт (миграция 002) |
+| `develop` | ✅ запускается, два бота разделены, Mini App + календарь подключены | основной проект |
+| `calendar` | ⚠️ устарела, НЕ мержить | старый прототип ICS-экспорта; форкнулась до Mini App/ИИ-чата/сплита ботов — содержит их удаление. ICS-генератор (`ical/generator.py`) и эндпоинты перенесены в `develop` вручную (см. выше) |
 | `bot-split` | ⚠️ устарела, НЕ мержить | старый прототип разделения; форкнулась до Mini App/ИИ-чата/миграций 003-004 — содержит их удаление. Разделение реализовано прямо в `develop` (см. выше) |
-| `nastya-p` | 🔧 в разработке | Mini App (фронтенд) |
+| `nastya-p` | 🔧 в разработке | Mini App (фронтенд) — превзойдена тем, что уже в `develop` |
 | `marina` | 🔧 в разработке | ИИ-чат по истории группы (миграция 005 — `group_messages`, расширение) |
 
+> Обе ветки (`calendar`, `bot-split`) старые форки `develop` — **не мержить напрямую**, это
+> снесёт всё, что появилось после них. Если нужно что-то оттуда — смотреть точечно через
+> `git show origin/<branch>:path` и переносить вручную, как уже сделано.
+
 ### Чтобы довести до «работает как надо»
-1. Применить в Supabase миграцию `006_add_group_chat_id.sql` (`alter table users add column if not exists group_chat_id bigint;`) → ИИ-чат начнёт видеть дедлайны группы.
+1. Применить в Supabase миграции `002_add_ical_token.sql` и `006_add_group_chat_id.sql` (обе
+   `IF NOT EXISTS` — безопасно выполнить даже если что-то из этого уже было).
 2. Заполнить в `.env` оба токена: `BOT_TOKEN` (@TimetableRRBot) и `GROUP_BOT_TOKEN` (@informationRRbot) — без второго `bot.main` не стартует (`ConfigError`).
-3. Вмержить `marina` (005) и `calendar` (002) в `develop`, применить миграции — для истории чата и ICS-экспорта.
-4. Поднять Mini App: запустить `mini_app/server.py`, задать `MINI_APP_URL` (ngrok) в `.env`.
+3. Перевести `MINI_APP_URL` с временного Cloudflare quick tunnel на что-то постоянное (именованный
+   ngrok-туннель с authtoken или реальный хостинг) — иначе адрес отваливается при каждом перезапуске.
+4. Вмержить `marina` (005) в `develop`, применить миграцию — для истории чата в ИИ-ответах.
 5. Удалить тестовую запись `telegram_id=999999999`.
 
 > Персональные памятки разработчиков — в `CLAUDE_*.md` в корне репозитория.

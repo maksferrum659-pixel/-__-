@@ -182,7 +182,12 @@
   }
 
   function onYandexClick() {
-    notify('Готово! Пары и дедлайны добавлены в твой Яндекс-календарь 📅');
+    haptic('light');
+    apiGet('/api/calendar-link').then(function (data) {
+      notify('Скопируй ссылку и добавь в Яндекс.Календарь (Добавить календарь → По ссылке):\n\n' + data.webcal_url);
+    }).catch(function () {
+      notify('Не удалось получить ссылку на календарь. Открой мини-апп из бота и попробуй снова.');
+    });
   }
 
   function onSubjectTap(name, meta) {
