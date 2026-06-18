@@ -1,0 +1,915 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<title>Учёба Бот</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Segoe UI", Roboto, sans-serif; background: #eaeef3; }
+  ::-webkit-scrollbar { width: 0; height: 0; }
+  @keyframes ub-pop { from { transform: translateY(8px); } to { transform: translateY(0); } }
+  .ub-screen { opacity: 1; animation: ub-pop 0.26s cubic-bezier(.2,.7,.3,1); }
+  @keyframes ub-modal-in { from { transform: translateY(24px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+  @keyframes ub-backdrop-in { from { opacity: 0; } to { opacity: 1; } }
+</style>
+</head>
+<body>
+
+<div style="width: 100%; max-width: 480px; margin: 0 auto; min-height: 100vh; background: #eaeef3; display: flex; flex-direction: column; position: relative; overflow: hidden;">
+
+  <!-- ============ HEADER ============ -->
+  <div style="display: flex; align-items: center; justify-content: space-between; padding: 14px 16px 12px; background: #ffffff; position: sticky; top: 0; z-index: 20;">
+    <div id="header-left" style="min-width: 76px; display: flex; align-items: center;"></div>
+    <div style="text-align: center; line-height: 1.15; flex: 1;">
+      <div id="header-title" style="font-size: 17px; font-weight: 700; color: #1b2440;"></div>
+      <div id="header-subtitle" style="font-size: 12px; color: #9aa3b1; margin-top: 1px;"></div>
+    </div>
+    <div style="min-width: 76px; display: flex; justify-content: flex-end;">
+      <div onclick="onMenuClick()" style="width: 30px; height: 30px; border-radius: 50%; background: #eef4ff; display: flex; align-items: center; justify-content: center; cursor: pointer;">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="3" cy="8" r="1.6" fill="#2f86ff"/><circle cx="8" cy="8" r="1.6" fill="#2f86ff"/><circle cx="13" cy="8" r="1.6" fill="#2f86ff"/></svg>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ SCROLL AREA ============ -->
+  <div id="screen" style="flex: 1; padding: 8px 14px 96px; display: flex; flex-direction: column; gap: 12px;"></div>
+
+  <!-- ============ BOTTOM NAV ============ -->
+  <div id="bottomnav" style="position: sticky; bottom: 0; background: rgba(255,255,255,0.96); backdrop-filter: blur(10px); border-top: 1px solid #e6e9ee; display: flex; justify-content: space-around; padding: 8px 4px 14px; z-index: 20;"></div>
+
+  <!-- ============ MODAL ============ -->
+  <div id="modal-overlay" style="display: none;"></div>
+
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  var tg = window.Telegram && window.Telegram.WebApp;
+  var INIT_DATA = (tg && tg.initData) || '';
+  var ACTIVE = '#2f86ff';
+  var IDLE = '#aab2c0';
+
+  var PALETTE = [
+    { accent: '#2f86ff', bg: '#e6f0fe' },
+    { accent: '#34a853', bg: '#e4f5ea' },
+    { accent: '#8b5cf6', bg: '#efeaf6' },
+    { accent: '#f5a623', bg: '#fdf1e0' },
+    { accent: '#e23b3b', bg: '#fde9e9' },
+  ];
+  var SUBJECT_EMOJI = ['📚', '📐', '🧪', '💻', '📜', '🗣️', '🎨', '⚙️'];
+  var WEEKDAY_SHORT = ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'];
+  var WEEKDAY_LONG = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота', 'Воскресенье'];
+  var MONTHS_RU = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
+  var MONTHS_SHORT_RU = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
+
+  var state = {
+    screen: 'home',
+    selectedDay: 0,
+    query: '',
+    today: { status: 'idle', lessons: [] },
+    week: { status: 'idle', days: [], subtitle: '' },
+    exams: { status: 'idle', items: [], subtitle: '' },
+    subjects: { status: 'idle', items: [] },
+  };
+
+  var titles = {
+    home: ['Учёба Бот', 'мини-приложение'],
+    today: ['Сегодня', 'расписание дня'],
+    week: ['Неделя', 'расписание недели'],
+    exams: ['Сессия', 'зачёты и экзамены'],
+    search: ['Поиск', 'по предметам'],
+    day: ['День', 'расписание дня'],
+  };
+
+  function escapeHtml(str) {
+    return String(str).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  function hashStr(s) {
+    var h = 0;
+    s = String(s || '');
+    for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+    return h;
+  }
+
+  function colorFor(key) {
+    return PALETTE[hashStr(key) % PALETTE.length];
+  }
+
+  function emojiFor(key) {
+    return SUBJECT_EMOJI[hashStr(key) % SUBJECT_EMOJI.length];
+  }
+
+  function pluralPairs(n) {
+    var mod10 = n % 10, mod100 = n % 100;
+    if (mod100 >= 11 && mod100 <= 14) return n + ' пар';
+    if (mod10 === 1) return n + ' пара';
+    if (mod10 >= 2 && mod10 <= 4) return n + ' пары';
+    return n + ' пар';
+  }
+
+  // ---- даты/время (всё в Europe/Moscow) ------------------------------------
+  function mskKey(dateOrIso) {
+    var d = dateOrIso instanceof Date ? dateOrIso : new Date(dateOrIso);
+    return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Moscow' }).format(d); // YYYY-MM-DD
+  }
+
+  function addDaysToKey(key, days) {
+    var d = new Date(key + 'T00:00:00Z');
+    d.setUTCDate(d.getUTCDate() + days);
+    return d.toISOString().slice(0, 10);
+  }
+
+  function weekdayIndexOfKey(key) {
+    var d = new Date(key + 'T00:00:00Z');
+    return (d.getUTCDay() + 6) % 7; // Monday=0 ... Sunday=6
+  }
+
+  function keyParts(key) {
+    var p = key.split('-');
+    return { y: +p[0], m: +p[1], d: +p[2] };
+  }
+
+  function fmtTime(iso) {
+    var d = new Date(iso);
+    return new Intl.DateTimeFormat('ru-RU', { timeZone: 'Europe/Moscow', hour: '2-digit', minute: '2-digit' }).format(d);
+  }
+
+  function fmtDateLong(key) {
+    var p = keyParts(key);
+    return p.d + ' ' + MONTHS_RU[p.m - 1];
+  }
+
+  // ---- сеть -----------------------------------------------------------------
+  function apiGet(path) {
+    return fetch(path, { headers: { 'x-init-data': INIT_DATA } }).then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    });
+  }
+
+  function haptic(style) {
+    try { if (tg && tg.HapticFeedback) tg.HapticFeedback.impactOccurred(style || 'light'); } catch (e) {}
+  }
+
+  function notify(msg) {
+    haptic('medium');
+    try {
+      if (tg && tg.showAlert) tg.showAlert(msg);
+      else if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+      else alert(msg);
+    } catch (e) {}
+  }
+
+  function syncBackButton() {
+    if (tg && tg.BackButton) {
+      if (state.screen === 'home') tg.BackButton.hide();
+      else tg.BackButton.show();
+    }
+  }
+
+  function onClose() {
+    try { if (tg && tg.close) tg.close(); } catch (e) {}
+  }
+
+  function onMenuClick() {
+    haptic('light');
+  }
+
+  function showToast(message) {
+    var overlay = document.getElementById('modal-overlay');
+    overlay.innerHTML =
+      '<div style="position: fixed; left: 0; right: 0; bottom: 28px; display: flex; justify-content: center; z-index: 95; padding: 0 24px; pointer-events: none;">' +
+        '<div style="background: #1b2440; color: #fff; border-radius: 14px; padding: 12px 18px; font-size: 13.5px; font-weight: 600; text-align: center; line-height: 1.35; box-shadow: 0 6px 20px rgba(0,0,0,0.25); animation: ub-modal-in 0.22s cubic-bezier(.2,.7,.3,1); max-width: 100%;">' + escapeHtml(message) + '</div>' +
+      '</div>';
+    overlay.style.display = 'block';
+    setTimeout(function () {
+      overlay.style.display = 'none';
+      overlay.innerHTML = '';
+    }, 2400);
+  }
+
+  function onYandexClick() {
+    haptic('light');
+    try {
+      apiGet('/api/calendar-link').then(function (data) {
+        copyToClipboard(data.webcal_url).then(function (ok) {
+          if (ok) {
+            showToast('Ссылка на календарь скопирована 📋 Вставь её в Яндекс.Календаре: Добавить календарь → По ссылке.');
+          } else {
+            showCalendarModal(data.webcal_url);
+          }
+        }).catch(function () {
+          showCalendarModal(data.webcal_url);
+        });
+      }).catch(function () {
+        showToast('Не удалось получить ссылку на календарь. Попробуй снова.');
+      });
+    } catch (e) {
+      showToast('Не удалось получить ссылку на календарь. Попробуй снова.');
+    }
+  }
+
+  function copyToClipboard(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text).then(function () { return true; }).catch(function () { return false; });
+    }
+    return Promise.resolve(false);
+  }
+
+  function showCalendarModal(webcalUrl) {
+    var overlay = document.getElementById('modal-overlay');
+    overlay.innerHTML =
+      '<div onclick="closeCalendarModal()" style="position: fixed; inset: 0; background: rgba(20,30,60,0.45); z-index: 90; animation: ub-backdrop-in 0.18s ease-out;"></div>' +
+      '<div style="position: fixed; left: 0; right: 0; bottom: 0; z-index: 91; display: flex; justify-content: center;">' +
+        '<div onclick="event.stopPropagation()" style="width: 100%; max-width: 480px; background: #fff; border-radius: 22px 22px 0 0; padding: 20px 18px calc(20px + env(safe-area-inset-bottom, 0px)); animation: ub-modal-in 0.22s cubic-bezier(.2,.7,.3,1);">' +
+          '<div style="width: 36px; height: 4px; border-radius: 4px; background: #e2e6ed; margin: 0 auto 14px;"></div>' +
+          '<div style="display: flex; align-items: center; gap: 10px;">' +
+            '<div style="width: 38px; height: 38px; border-radius: 10px; background: #fc3f1d; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><span style="color: #fff; font-weight: 800; font-size: 18px;">Я</span></div>' +
+            '<div style="font-size: 17px; font-weight: 800; color: #1b2440;">Подписка на календарь</div>' +
+          '</div>' +
+          '<div style="font-size: 13.5px; color: #8a93a3; margin-top: 10px; line-height: 1.4;">Скопируй ссылку и в Яндекс.Календаре открой <b>Добавить календарь → По ссылке</b>. Подходит и для Google, Apple Calendar, Outlook.</div>' +
+          '<div style="display: flex; align-items: center; gap: 8px; background: #f3f5f8; border-radius: 14px; padding: 12px 14px; margin-top: 14px;">' +
+            '<input id="calendar-link-input" readonly value="' + escapeHtml(webcalUrl) + '" onclick="this.select()" style="flex: 1; min-width: 0; border: none; outline: none; background: transparent; font-size: 12.5px; color: #4a5466; font-family: monospace;">' +
+          '</div>' +
+          '<div id="calendar-copy-btn" onclick="copyCalendarLink(' + JSON.stringify(webcalUrl) + ')" style="margin-top: 14px; background: #2f86ff; border-radius: 16px; padding: 13px; text-align: center; font-size: 15px; font-weight: 700; color: #fff; cursor: pointer;">Скопировать ссылку</div>' +
+          '<div onclick="closeCalendarModal()" style="margin-top: 10px; padding: 13px; text-align: center; font-size: 15px; font-weight: 600; color: #8a93a3; cursor: pointer;">Готово</div>' +
+        '</div>' +
+      '</div>';
+    overlay.style.display = 'block';
+  }
+
+  function closeCalendarModal() {
+    haptic('light');
+    var overlay = document.getElementById('modal-overlay');
+    overlay.style.display = 'none';
+    overlay.innerHTML = '';
+  }
+
+  function copyCalendarLink(webcalUrl) {
+    haptic('medium');
+    copyToClipboard(webcalUrl).then(function (ok) {
+      var btn = document.getElementById('calendar-copy-btn');
+      if (btn) {
+        btn.textContent = ok ? 'Скопировано ✓' : 'Не удалось — выдели вручную';
+        btn.style.background = ok ? '#1f9d4d' : '#aab2c0';
+      }
+      if (!ok) {
+        var input = document.getElementById('calendar-link-input');
+        if (input) input.select();
+      }
+    });
+  }
+
+  window.closeCalendarModal = closeCalendarModal;
+  window.copyCalendarLink = copyCalendarLink;
+
+  function onSubjectTap(name, meta) {
+    notify(name + '\n\n' + meta);
+  }
+
+  window.onMenuClick = onMenuClick;
+  window.onYandexClick = onYandexClick;
+  window.onSubjectTap = onSubjectTap;
+
+  // ---- маппинг ответов API в форму экранов -----------------------------------
+  function toLesson(ev) {
+    var c = colorFor(ev.discipline_name);
+    return {
+      time: fmtTime(ev.starts_at), end: fmtTime(ev.ends_at),
+      subject: ev.discipline_name, room: ev.room || '—', teacher: ev.teacher || '—',
+      type: ev.kind || 'Занятие', accent: c.accent, bg: c.bg,
+      _key: mskKey(ev.starts_at),
+    };
+  }
+
+  function buildToday(events) {
+    var lessons = events.map(toLesson).sort(function (a, b) { return a.time < b.time ? -1 : 1; });
+    return { status: 'loaded', lessons: lessons };
+  }
+
+  function buildWeek(events) {
+    var lessons = events.map(toLesson);
+    var todayKey = mskKey(new Date());
+    var mondayKey = addDaysToKey(todayKey, -weekdayIndexOfKey(todayKey));
+    var days = [];
+    for (var i = 0; i < 6; i++) { // Пн–Сб
+      var key = addDaysToKey(mondayKey, i);
+      var dayLessons = lessons.filter(function (l) { return l._key === key; })
+        .sort(function (a, b) { return a.time < b.time ? -1 : 1; });
+      var c = colorFor(key);
+      var p = keyParts(key);
+      days.push({
+        key: key, num: String(p.d).padStart(2, '0'), dow: WEEKDAY_SHORT[i], name: WEEKDAY_LONG[i],
+        date: fmtDateLong(key),
+        range: dayLessons.length ? (dayLessons[0].time + ' – ' + dayLessons[dayLessons.length - 1].end) : 'занятий нет',
+        count: dayLessons.length ? pluralPairs(dayLessons.length) : 'выходной',
+        accent: dayLessons.length ? c.accent : '#9aa3b1', bg: dayLessons.length ? c.bg : '#eef1f5',
+        opacity: dayLessons.length ? '1' : '0.6', lessons: dayLessons,
+      });
+    }
+    var total = days.reduce(function (s, d) { return s + d.lessons.length; }, 0);
+    var p0 = keyParts(days[0].key), p5 = keyParts(days[5].key);
+    var subtitle = p0.d + ' – ' + p5.d + ' ' + MONTHS_RU[p5.m - 1] + ' · ' + (total ? pluralPairs(total) : 'занятий нет');
+    return { status: 'loaded', days: days, subtitle: subtitle };
+  }
+
+  function buildExams(data) {
+    var now = new Date();
+    var items = [];
+    (data.events || []).forEach(function (e) {
+      var d = new Date(e.starts_at);
+      items.push({
+        date: d, subject: e.discipline_name, type: e.kind || 'Зачёт',
+        sub: (e.teacher || '—') + (e.room ? ', ауд. ' + e.room : ''),
+      });
+    });
+    (data.deadlines || []).forEach(function (dl) {
+      if (!dl.due_at) return;
+      var d = new Date(dl.due_at);
+      items.push({
+        date: d, subject: dl.discipline_name || '—', type: dl.work_type || 'Дедлайн',
+        sub: dl.raw_quote ? ('«' + dl.raw_quote.slice(0, 60) + '»') : 'из группового чата',
+      });
+    });
+    items.sort(function (a, b) { return a.date - b.date; });
+    items.forEach(function (it) {
+      var c = colorFor(it.subject);
+      it.accent = c.accent; it.bg = c.bg;
+      it.day = String(it.date.getUTCDate()).padStart(2, '0');
+      it.month = MONTHS_SHORT_RU[it.date.getUTCMonth()];
+      var diffDays = Math.ceil((it.date - now) / 86400000);
+      it.left = diffDays < 0 ? 'прошло' : (diffDays === 0 ? 'сегодня' : diffDays + ' дн');
+    });
+    var future = items.filter(function (it) { return it.date >= now; });
+    var subtitle = items.length
+      ? (items.length + ' ' + (items.length === 1 ? 'событие' : 'событий') +
+         (future.length ? ' · ближайшее через ' + future[0].left : ''))
+      : 'пока ничего не запланировано';
+    return { status: 'loaded', items: items, subtitle: subtitle };
+  }
+
+  function buildSubjects(data) {
+    var byName = {};
+    (data.events || []).forEach(function (e) {
+      var key = e.discipline_name;
+      if (!key) return;
+      if (!byName[key]) byName[key] = { name: key, kinds: [], weekdays: [], teacher: '', deadline: null };
+      var entry = byName[key];
+      if (e.kind && entry.kinds.indexOf(e.kind) === -1) entry.kinds.push(e.kind);
+      var wd = WEEKDAY_SHORT[weekdayIndexOfKey(mskKey(e.starts_at))];
+      var wdCap = wd.charAt(0).toUpperCase() + wd.slice(1);
+      if (entry.weekdays.indexOf(wdCap) === -1) entry.weekdays.push(wdCap);
+      if (!entry.teacher && e.teacher) entry.teacher = e.teacher;
+    });
+    (data.deadlines || []).forEach(function (dl) {
+      var key = dl.discipline_name;
+      if (!key) return;
+      if (!byName[key]) byName[key] = { name: key, kinds: [], weekdays: [], teacher: '', deadline: null };
+      if (dl.due_at) byName[key].deadline = { work_type: dl.work_type || 'Дедлайн', due_at: dl.due_at };
+    });
+    var items = Object.keys(byName).map(function (name) {
+      var e = byName[name];
+      var c = colorFor(name);
+      var meta;
+      if (e.deadline) {
+        var d = new Date(e.deadline.due_at);
+        meta = e.deadline.work_type + ' ' + d.getUTCDate() + ' ' + MONTHS_RU[d.getUTCMonth()] +
+          (e.teacher ? ' · ' + e.teacher : '');
+      } else {
+        meta = (e.kinds.join(', ') || 'Занятие') +
+          (e.weekdays.length ? ' · ' + e.weekdays.join(', ') : '') +
+          (e.teacher ? ' · ' + e.teacher : '');
+      }
+      return { name: name, meta: meta, emoji: emojiFor(name), bg: c.bg };
+    });
+    items.sort(function (a, b) { return a.name.localeCompare(b.name, 'ru'); });
+    return { status: 'loaded', items: items };
+  }
+
+  // ---- навигация --------------------------------------------------------------
+  function setLoadingScreen() {
+    document.getElementById('screen').innerHTML =
+      '<div style="display: flex; justify-content: center; padding: 70px 0;">' +
+        '<div style="color: #aab2c0; font-size: 14px;">Загрузка…</div>' +
+      '</div>';
+  }
+
+  function errorScreenHtml(retryScreen) {
+    return '<div style="text-align: center; padding: 50px 20px; color: #8a93a3;">' +
+      '<div style="font-size: 32px;">⚠️</div>' +
+      '<div style="font-size: 14px; margin-top: 10px; line-height: 1.4;">Не удалось загрузить данные.<br>Открой мини-апп из бота и проверь соединение.</div>' +
+      '<div onclick="go(' + JSON.stringify(retryScreen) + ')" style="display: inline-block; margin-top: 14px; background: #fff; border-radius: 14px; padding: 9px 16px; font-size: 13.5px; font-weight: 600; color: #2f86ff; cursor: pointer;">Повторить</div>' +
+    '</div>';
+  }
+
+  async function loadScreenData(screen) {
+    try {
+      if (screen === 'today') {
+        var events = await apiGet('/api/schedule/today');
+        state.today = buildToday(events);
+      } else if (screen === 'week') {
+        var wevents = await apiGet('/api/schedule/week');
+        state.week = buildWeek(wevents);
+      } else if (screen === 'exams') {
+        var edata = await apiGet('/api/exams');
+        state.exams = buildExams(edata);
+      } else if (screen === 'search') {
+        var sdata = await apiGet('/api/subjects');
+        state.subjects = buildSubjects(sdata);
+      }
+    } catch (e) {
+      if (screen === 'today') state.today = { status: 'error', lessons: [] };
+      else if (screen === 'week') state.week = { status: 'error', days: [], subtitle: '' };
+      else if (screen === 'exams') state.exams = { status: 'error', items: [], subtitle: '' };
+      else if (screen === 'search') state.subjects = { status: 'error', items: [] };
+    }
+  }
+
+  async function go(screen) {
+    haptic('light');
+    state.screen = screen;
+    syncBackButton();
+    renderHeaderAndNav();
+    var needsData = { today: 1, week: 1, exams: 1, search: 1 }[screen];
+    if (needsData) {
+      setLoadingScreen();
+      await loadScreenData(screen);
+    }
+    renderScreenContent();
+  }
+
+  function openDay(i) {
+    haptic('light');
+    state.screen = 'day';
+    state.selectedDay = i;
+    syncBackButton();
+    renderHeaderAndNav();
+    renderScreenContent();
+  }
+
+  function back() {
+    go(state.screen === 'day' ? 'week' : 'home');
+  }
+
+  window.go = go;
+  window.openDay = openDay;
+  window.back = back;
+  window.onClose = onClose;
+
+  // ---- разметка экранов ---------------------------------------------------
+  function lessonCardHtml(l) {
+    return '' +
+      '<div style="background: #fff; border-radius: 20px; padding: 14px; display: flex; gap: 13px; box-shadow: 0 1px 2px rgba(20,30,60,0.04);">' +
+        '<div style="display: flex; flex-direction: column; align-items: center; min-width: 50px;">' +
+          '<div style="font-size: 16px; font-weight: 800; color: #1b2440;">' + escapeHtml(l.time) + '</div>' +
+          '<div style="font-size: 12px; color: #aab2c0; margin-top: 1px;">' + escapeHtml(l.end) + '</div>' +
+          '<div style="flex: 1; width: 2px; background: ' + l.accent + '; opacity: 0.3; border-radius: 2px; margin-top: 8px; min-height: 14px;"></div>' +
+        '</div>' +
+        '<div style="flex: 1; min-width: 0;">' +
+          '<div style="display: inline-flex; align-items: center; padding: 3px 9px; border-radius: 20px; background: ' + l.bg + '; font-size: 11.5px; font-weight: 700; color: ' + l.accent + ';">' + escapeHtml(l.type) + '</div>' +
+          '<div style="font-size: 16px; font-weight: 700; color: #1b2440; margin-top: 7px; line-height: 1.25;">' + escapeHtml(l.subject) + '</div>' +
+          '<div style="display: flex; align-items: center; gap: 12px; margin-top: 6px; font-size: 13px; color: #8a93a3;">' +
+            '<span style="display: inline-flex; align-items: center; gap: 4px;">📍 ' + escapeHtml(l.room) + '</span>' +
+            '<span style="display: inline-flex; align-items: center; gap: 4px;">👤 ' + escapeHtml(l.teacher) + '</span>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+  }
+
+  function emptyStateHtml(emoji, text) {
+    return '<div style="background: #eef1f5; border-radius: 18px; padding: 28px 16px; text-align: center;">' +
+      '<div style="font-size: 32px;">' + emoji + '</div>' +
+      '<div style="font-size: 14px; color: #8a93a3; font-weight: 600; margin-top: 8px;">' + escapeHtml(text) + '</div>' +
+    '</div>';
+  }
+
+  function renderHeaderLeft() {
+    if (state.screen === 'home') {
+      return '<div onclick="onClose()" style="font-size: 17px; color: #2f86ff; cursor: pointer;">Закрыть</div>';
+    }
+    return '<div onclick="back()" style="display: flex; align-items: center; gap: 3px; font-size: 17px; color: #2f86ff; cursor: pointer;">' +
+      '<svg width="11" height="18" viewBox="0 0 11 18" fill="none"><path d="M9 2 2 9l7 7" stroke="#2f86ff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>' +
+      'Назад</div>';
+  }
+
+  function renderHome() {
+    return '<div class="ub-screen" style="display: flex; flex-direction: column; gap: 12px;">' +
+
+      '<div style="position: relative; padding: 14px 6px 6px; min-height: 150px;">' +
+        '<div style="max-width: 215px;">' +
+          '<div style="font-size: 32px; font-weight: 800; color: #161e33; letter-spacing: -0.5px;">Привет! <span style="font-weight: 400;">👋</span></div>' +
+          '<div style="font-size: 15.5px; line-height: 1.4; color: #8a93a3; margin-top: 10px; text-wrap: pretty;">Я помогу тебе не пропустить важное и быть на шаг впереди.</div>' +
+        '</div>' +
+        '<div style="position: absolute; right: -10px; top: 0; width: 170px; height: 160px;">' +
+          '<svg width="170" height="160" viewBox="0 0 170 160" fill="none">' +
+            '<path d="M150 60c14 18 18 48-4 64-18 13-30 6-52 14-25 9-48 18-72 2C2 126-6 96 10 70 24 47 38 50 60 36 86 19 110 8 132 24c14 10 8 22 18 36Z" fill="#cdeed9"/>' +
+            '<g stroke="#a9dcbd" stroke-width="2" stroke-linecap="round" opacity="0.85" fill="none">' +
+              '<rect x="34" y="58" width="16" height="14" rx="3"/><path d="M34 63h16M40 56v4M44 56v4"/>' +
+              '<path d="M118 96l8-8M122 96l-8-8"/>' +
+              '<path d="M44 104c2-3 5-3 6 0M50 104c1-3 5-3 6 0" />' +
+              '<path d="M126 50l2 5 5 1-4 3 1 5-4-3-5 3 1-5-4-3 5-1z"/>' +
+            '</g>' +
+            '<g>' +
+              '<line x1="98" y1="40" x2="98" y2="26" stroke="#a8b4c4" stroke-width="3" stroke-linecap="round"/>' +
+              '<circle cx="98" cy="22" r="6" fill="#26d4bb"/>' +
+              '<rect x="62" y="58" width="10" height="24" rx="5" fill="#26d4bb"/>' +
+              '<rect x="124" y="58" width="10" height="24" rx="5" fill="#26d4bb"/>' +
+              '<rect x="66" y="40" width="64" height="56" rx="20" fill="#ffffff" stroke="#dde4ee" stroke-width="2"/>' +
+              '<rect x="74" y="50" width="48" height="36" rx="15" fill="#1c2c48"/>' +
+              '<path d="M84 66c1.5-4 6.5-4 8 0" stroke="#2ee6cb" stroke-width="3.2" stroke-linecap="round" fill="none"/>' +
+              '<path d="M104 66c1.5-4 6.5-4 8 0" stroke="#2ee6cb" stroke-width="3.2" stroke-linecap="round" fill="none"/>' +
+              '<path d="M91 74c3 3.5 11 3.5 14 0" stroke="#2ee6cb" stroke-width="3.2" stroke-linecap="round" fill="none"/>' +
+              '<rect x="74" y="98" width="48" height="34" rx="16" fill="#ffffff" stroke="#dde4ee" stroke-width="2"/>' +
+              '<circle cx="98" cy="113" r="6" fill="#cfe6ff"/>' +
+              '<rect x="56" y="100" width="13" height="26" rx="6.5" fill="#ffffff" stroke="#dde4ee" stroke-width="2"/>' +
+              '<g transform="rotate(28 130 96)">' +
+                '<rect x="124" y="74" width="13" height="30" rx="6.5" fill="#ffffff" stroke="#dde4ee" stroke-width="2"/>' +
+                '<circle cx="130.5" cy="72" r="9" fill="#ffffff" stroke="#dde4ee" stroke-width="2"/>' +
+              '</g>' +
+            '</g>' +
+          '</svg>' +
+        '</div>' +
+      '</div>' +
+
+      '<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">' +
+        '<div onclick="go(\'today\')" style="background: #e6f0fe; border-radius: 22px; padding: 16px 15px; display: flex; flex-direction: column; min-height: 168px; cursor: pointer;">' +
+          '<div style="display: flex; align-items: flex-start; gap: 8px;">' +
+            '<svg width="46" height="46" viewBox="0 0 46 46" fill="none" style="flex-shrink: 0; margin-top: -2px;">' +
+              '<rect x="6" y="9" width="30" height="28" rx="6" fill="#fff" stroke="#bcd6fb" stroke-width="2"/>' +
+              '<rect x="6" y="9" width="30" height="9" rx="6" fill="#3b82f6"/>' +
+              '<rect x="12" y="6" width="3" height="7" rx="1.5" fill="#2563eb"/><rect x="27" y="6" width="3" height="7" rx="1.5" fill="#2563eb"/>' +
+              '<rect x="11" y="22" width="4" height="4" rx="1" fill="#9cc3fb"/><rect x="19" y="22" width="4" height="4" rx="1" fill="#9cc3fb"/>' +
+              '<circle cx="30" cy="31" r="11" fill="#3b82f6" stroke="#fff" stroke-width="2.5"/>' +
+              '<path d="M30 26v5l3 2" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>' +
+            '</svg>' +
+            '<div style="font-size: 18px; font-weight: 700; color: #1b2440; line-height: 1.15;">Расписание<br>на сегодня</div>' +
+          '</div>' +
+          '<div style="flex: 1;"></div>' +
+          '<div style="display: flex; align-items: flex-end; justify-content: space-between; gap: 6px;">' +
+            '<div style="font-size: 13px; line-height: 1.3; color: #7c8696;">Смотри пары на сегодня и готовься заранее</div>' +
+            '<div style="width: 42px; height: 42px; border-radius: 50%; background: #2f86ff; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">' +
+              '<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M4 10h11M11 6l4 4-4 4" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>' +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+
+        '<div onclick="go(\'week\')" style="background: #e4f5ea; border-radius: 22px; padding: 16px 15px; display: flex; flex-direction: column; min-height: 168px; cursor: pointer;">' +
+          '<div style="display: flex; align-items: flex-start; gap: 8px;">' +
+            '<svg width="46" height="46" viewBox="0 0 46 46" fill="none" style="flex-shrink: 0; margin-top: -2px;">' +
+              '<rect x="7" y="9" width="32" height="28" rx="6" fill="#fff" stroke="#b8e3c6" stroke-width="2"/>' +
+              '<rect x="7" y="9" width="32" height="9" rx="6" fill="#34a853"/>' +
+              '<rect x="13" y="6" width="3" height="7" rx="1.5" fill="#2c8c46"/><rect x="30" y="6" width="3" height="7" rx="1.5" fill="#2c8c46"/>' +
+              '<rect x="12" y="23" width="5" height="4" rx="1.5" fill="#8fd6a4"/><rect x="20" y="23" width="5" height="4" rx="1.5" fill="#34a853"/><rect x="28" y="23" width="5" height="4" rx="1.5" fill="#8fd6a4"/>' +
+              '<rect x="12" y="30" width="5" height="4" rx="1.5" fill="#34a853"/><rect x="20" y="30" width="5" height="4" rx="1.5" fill="#8fd6a4"/><rect x="28" y="30" width="5" height="4" rx="1.5" fill="#34a853"/>' +
+            '</svg>' +
+            '<div style="font-size: 18px; font-weight: 700; color: #1b2440; line-height: 1.15;">Расписание<br>на неделю</div>' +
+          '</div>' +
+          '<div style="flex: 1;"></div>' +
+          '<div style="display: flex; align-items: flex-end; justify-content: space-between; gap: 6px;">' +
+            '<div style="font-size: 13px; line-height: 1.3; color: #7c8696;">Планируй неделю и не пропускай важное</div>' +
+            '<div style="width: 42px; height: 42px; border-radius: 50%; background: #fff; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">' +
+              '<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M4 10h11M11 6l4 4-4 4" stroke="#34a853" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>' +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+
+        '<div onclick="go(\'exams\')" style="background: #efeaf6; border-radius: 22px; padding: 16px 15px; display: flex; flex-direction: column; min-height: 168px; cursor: pointer;">' +
+          '<div style="display: flex; align-items: flex-start; gap: 8px;">' +
+            '<svg width="48" height="46" viewBox="0 0 48 46" fill="none" style="flex-shrink: 0; margin-top: 0;">' +
+              '<path d="M24 11 6 19l18 8 18-8z" fill="#2a2440"/>' +
+              '<path d="M13 24v8c0 3 5 5.5 11 5.5S35 35 35 32v-8" fill="none" stroke="#5b3fb0" stroke-width="3" stroke-linejoin="round"/>' +
+              '<path d="M42 19v9" stroke="#2a2440" stroke-width="2.4" stroke-linecap="round"/>' +
+              '<circle cx="42" cy="30" r="2.4" fill="#8b5cf6"/>' +
+            '</svg>' +
+            '<div style="font-size: 18px; font-weight: 700; color: #1b2440; line-height: 1.15;">Расписание зачётов и экзаменов</div>' +
+          '</div>' +
+          '<div style="flex: 1;"></div>' +
+          '<div style="display: flex; align-items: flex-end; justify-content: space-between; gap: 6px;">' +
+            '<div style="font-size: 13px; line-height: 1.3; color: #7c8696;">Все зачёты и экзамены в одном месте</div>' +
+            '<div style="width: 42px; height: 42px; border-radius: 50%; background: #fff; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">' +
+              '<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M4 10h11M11 6l4 4-4 4" stroke="#8b5cf6" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>' +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+
+        '<div onclick="go(\'search\')" style="background: #fdf1e0; border-radius: 22px; padding: 16px 15px; display: flex; flex-direction: column; min-height: 168px; cursor: pointer;">' +
+          '<div style="display: flex; align-items: flex-start; gap: 8px;">' +
+            '<svg width="46" height="46" viewBox="0 0 46 46" fill="none" style="flex-shrink: 0; margin-top: 0;">' +
+              '<circle cx="20" cy="20" r="12" fill="#fff" stroke="#5b6472" stroke-width="3"/>' +
+              '<circle cx="20" cy="20" r="6" fill="#eaf0f7"/>' +
+              '<path d="M29 29l8 8" stroke="#5b6472" stroke-width="4" stroke-linecap="round"/>' +
+            '</svg>' +
+            '<div style="font-size: 18px; font-weight: 700; color: #1b2440; line-height: 1.15;">Поиск<br>по предмету</div>' +
+          '</div>' +
+          '<div style="flex: 1;"></div>' +
+          '<div style="display: flex; align-items: flex-end; justify-content: space-between; gap: 6px;">' +
+            '<div style="font-size: 13px; line-height: 1.3; color: #7c8696;">Найди пары и дедлайны по любому предмету</div>' +
+            '<div style="width: 42px; height: 42px; border-radius: 50%; background: #fff; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">' +
+              '<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M4 10h11M11 6l4 4-4 4" stroke="#f5a623" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>' +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+      '</div>' +
+
+      '<div onclick="onYandexClick()" style="background: #fdf1d2; border-radius: 22px; padding: 14px 15px; display: flex; align-items: center; gap: 12px; cursor: pointer;">' +
+        '<svg width="44" height="44" viewBox="0 0 44 44" fill="none" style="flex-shrink: 0;">' +
+          '<rect x="6" y="9" width="32" height="29" rx="6" fill="#fff" stroke="#e8d9a8" stroke-width="2"/>' +
+          '<rect x="6" y="9" width="32" height="9" rx="6" fill="#e23b3b"/>' +
+          '<rect x="12" y="6" width="3" height="7" rx="1.5" fill="#b82c2c"/><rect x="29" y="6" width="3" height="7" rx="1.5" fill="#b82c2c"/>' +
+          '<text x="22" y="33" text-anchor="middle" font-size="14" font-weight="800" fill="#33404f" font-family="-apple-system, Inter, sans-serif">31</text>' +
+        '</svg>' +
+        '<div style="flex: 1; min-width: 0;">' +
+          '<div style="font-size: 16px; font-weight: 700; color: #1b2440; line-height: 1.2;">Интегрировать<br>в Яндекс-календарь</div>' +
+          '<div style="font-size: 12.5px; color: #9a9279; margin-top: 4px;">Добавь пары и дедлайны в свой календарь</div>' +
+        '</div>' +
+        '<div style="background: #fff; border-radius: 22px; padding: 8px 12px 8px 8px; display: flex; align-items: center; gap: 7px; flex-shrink: 0; box-shadow: 0 1px 3px rgba(0,0,0,0.06);">' +
+          '<div style="width: 24px; height: 24px; border-radius: 6px; background: #fc3f1d; display: flex; align-items: center; justify-content: center;"><span style="color: #fff; font-weight: 800; font-size: 15px;">Я</span></div>' +
+          '<span style="font-size: 14px; font-weight: 600; color: #1b2440;">Подключить</span>' +
+        '</div>' +
+      '</div>' +
+
+      '<div style="background: #e9f1fc; border-radius: 22px; padding: 14px 15px; display: flex; align-items: center; gap: 11px;">' +
+        '<svg width="46" height="46" viewBox="0 0 46 46" fill="none" style="flex-shrink: 0;">' +
+          '<line x1="23" y1="9" x2="23" y2="4" stroke="#a8b4c4" stroke-width="2.4" stroke-linecap="round"/>' +
+          '<circle cx="23" cy="3" r="2.6" fill="#26d4bb"/>' +
+          '<rect x="9" y="14" width="6" height="14" rx="3" fill="#26d4bb"/><rect x="31" y="14" width="6" height="14" rx="3" fill="#26d4bb"/>' +
+          '<rect x="11" y="9" width="24" height="24" rx="9" fill="#fff" stroke="#cfe0f5" stroke-width="2"/>' +
+          '<rect x="15" y="13" width="16" height="15" rx="6" fill="#1c2c48"/>' +
+          '<path d="M18.5 19c.7-1.6 3-1.6 3.6 0" stroke="#2ee6cb" stroke-width="2" stroke-linecap="round" fill="none"/>' +
+          '<path d="M24 19c.7-1.6 3-1.6 3.6 0" stroke="#2ee6cb" stroke-width="2" stroke-linecap="round" fill="none"/>' +
+          '<path d="M19.5 23.5c1.6 1.6 5 1.6 6.6 0" stroke="#2ee6cb" stroke-width="2" stroke-linecap="round" fill="none"/>' +
+        '</svg>' +
+        '<div style="flex: 1; min-width: 0;">' +
+          '<div style="font-size: 14.5px; font-weight: 700; color: #1b2440; line-height: 1.25;">Я слушаю групповой чат и сам нахожу дедлайны 💬</div>' +
+          '<div style="font-size: 13px; color: #8a93a3; margin-top: 3px;">Ты отдыхаешь — я слежу 💙</div>' +
+        '</div>' +
+        '<div style="background: #d9f3e1; border-radius: 22px; padding: 7px 12px; display: flex; align-items: center; gap: 5px; flex-shrink: 0;">' +
+          '<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3 7.5l3 3 5-6.5" stroke="#1f9d4d" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>' +
+          '<span style="font-size: 13.5px; font-weight: 700; color: #1f9d4d;">Активно</span>' +
+        '</div>' +
+      '</div>' +
+
+      '<div style="background: #e7ebf1; border-radius: 18px; padding: 13px 15px;">' +
+        '<div style="display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 700; color: #4a5466;"><span style="font-size: 16px;">💡</span> Подсказка</div>' +
+        '<div style="font-size: 13px; color: #8a93a3; margin-top: 4px; line-height: 1.35;">Нажимай на нужный раздел выше — и я покажу всё, что важно.</div>' +
+      '</div>' +
+    '</div>';
+  }
+
+  function renderToday() {
+    if (state.today.status === 'error') return errorScreenHtml('today');
+    var html = '<div class="ub-screen" style="display: flex; flex-direction: column; gap: 12px;">' +
+      '<div style="display: flex; align-items: center; justify-content: space-between; padding: 4px 4px 0;">' +
+        '<div>' +
+          '<div style="font-size: 26px; font-weight: 800; color: #161e33; letter-spacing: -0.4px;">Сегодня</div>' +
+          '<div style="font-size: 14px; color: #8a93a3; margin-top: 2px;">' + (state.today.lessons.length ? pluralPairs(state.today.lessons.length) : 'занятий нет') + '</div>' +
+        '</div>' +
+        '<div style="width: 46px; height: 46px; border-radius: 50%; background: #e6f0fe; display: flex; align-items: center; justify-content: center;">' +
+          '<svg width="24" height="24" viewBox="0 0 24 24" fill="none"><rect x="3" y="5" width="18" height="16" rx="4" stroke="#2f86ff" stroke-width="2"/><path d="M3 9h18M8 3v4M16 3v4" stroke="#2f86ff" stroke-width="2" stroke-linecap="round"/></svg>' +
+        '</div>' +
+      '</div>';
+    if (state.today.lessons.length === 0) {
+      html += emptyStateHtml('🎉', 'Сегодня пар нет. Если расписание не привязано — используй /link у бота.');
+    } else {
+      for (var i = 0; i < state.today.lessons.length; i++) html += lessonCardHtml(state.today.lessons[i]);
+      html += '<div style="background: #e4f5ea; border-radius: 18px; padding: 14px 16px; display: flex; align-items: center; gap: 10px;">' +
+        '<span style="font-size: 20px;">🎉</span>' +
+        '<div style="font-size: 13.5px; color: #2c7a48; font-weight: 600; line-height: 1.35;">Это всё на сегодня. Дальше — заслуженный отдых!</div>' +
+      '</div>';
+    }
+    html += '</div>';
+    return html;
+  }
+
+  function renderWeek() {
+    if (state.week.status === 'error') return errorScreenHtml('week');
+    var html = '<div class="ub-screen" style="display: flex; flex-direction: column; gap: 12px;">' +
+      '<div style="padding: 4px 4px 0;">' +
+        '<div style="font-size: 26px; font-weight: 800; color: #161e33; letter-spacing: -0.4px;">Неделя</div>' +
+        '<div style="font-size: 14px; color: #8a93a3; margin-top: 2px;">' + escapeHtml(state.week.subtitle) + '</div>' +
+      '</div>';
+    for (var i = 0; i < state.week.days.length; i++) {
+      var d = state.week.days[i];
+      html += '<div onclick="openDay(' + i + ')" style="background: #fff; border-radius: 20px; padding: 14px 16px; box-shadow: 0 1px 2px rgba(20,30,60,0.04); opacity: ' + d.opacity + '; cursor: pointer;">' +
+        '<div style="display: flex; align-items: center; justify-content: space-between; gap: 10px;">' +
+          '<div style="display: flex; align-items: center; gap: 11px; min-width: 0;">' +
+            '<div style="width: 42px; height: 42px; border-radius: 13px; background: ' + d.bg + '; display: flex; flex-direction: column; align-items: center; justify-content: center; flex-shrink: 0;">' +
+              '<span style="font-size: 15px; font-weight: 800; color: ' + d.accent + ';">' + d.num + '</span>' +
+              '<span style="font-size: 9px; font-weight: 700; color: ' + d.accent + '; text-transform: uppercase;">' + d.dow + '</span>' +
+            '</div>' +
+            '<div style="min-width: 0;">' +
+              '<div style="font-size: 15.5px; font-weight: 700; color: #1b2440;">' + d.name + '</div>' +
+              '<div style="font-size: 12.5px; color: #9aa3b1; margin-top: 1px;">' + escapeHtml(d.range) + '</div>' +
+            '</div>' +
+          '</div>' +
+          '<div style="display: flex; align-items: center; gap: 8px; flex-shrink: 0;">' +
+            '<div style="display: inline-flex; align-items: center; padding: 5px 11px; border-radius: 20px; background: ' + d.bg + '; font-size: 12.5px; font-weight: 700; color: ' + d.accent + ';">' + d.count + '</div>' +
+            '<svg width="9" height="16" viewBox="0 0 9 16" fill="none"><path d="M2 2l5 6-5 6" stroke="#c2cad6" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+    }
+    html += '</div>';
+    return html;
+  }
+
+  function renderDay() {
+    var sd = state.week.days[state.selectedDay];
+    if (!sd) return errorScreenHtml('week');
+    var html = '<div class="ub-screen" style="display: flex; flex-direction: column; gap: 12px;">' +
+      '<div style="display: flex; align-items: center; justify-content: space-between; padding: 4px 4px 0;">' +
+        '<div>' +
+          '<div style="font-size: 26px; font-weight: 800; color: #161e33; letter-spacing: -0.4px;">' + sd.name + '</div>' +
+          '<div style="font-size: 14px; color: #8a93a3; margin-top: 2px;">' + escapeHtml(sd.date) + ' · ' + sd.count + '</div>' +
+        '</div>' +
+        '<div style="width: 46px; height: 46px; border-radius: 50%; background: ' + sd.bg + '; display: flex; flex-direction: column; align-items: center; justify-content: center;">' +
+          '<span style="font-size: 16px; font-weight: 800; color: ' + sd.accent + '; line-height: 1;">' + sd.num + '</span>' +
+          '<span style="font-size: 8.5px; font-weight: 700; color: ' + sd.accent + '; text-transform: uppercase;">' + sd.dow + '</span>' +
+        '</div>' +
+      '</div>';
+    for (var i = 0; i < sd.lessons.length; i++) html += lessonCardHtml(sd.lessons[i]);
+    if (sd.lessons.length === 0) html += emptyStateHtml('😴', 'В этот день занятий нет — отдыхай!');
+    html += '</div>';
+    return html;
+  }
+
+  function renderExams() {
+    if (state.exams.status === 'error') return errorScreenHtml('exams');
+    var html = '<div class="ub-screen" style="display: flex; flex-direction: column; gap: 12px;">' +
+      '<div style="padding: 4px 4px 0;">' +
+        '<div style="font-size: 26px; font-weight: 800; color: #161e33; letter-spacing: -0.4px;">Сессия</div>' +
+        '<div style="font-size: 14px; color: #8a93a3; margin-top: 2px;">' + escapeHtml(state.exams.subtitle) + '</div>' +
+      '</div>';
+    if (state.exams.items.length === 0) {
+      html += emptyStateHtml('🎓', 'Зачётов и экзаменов пока не видно.');
+    }
+    for (var i = 0; i < state.exams.items.length; i++) {
+      var e = state.exams.items[i];
+      html += '<div style="background: #fff; border-radius: 20px; padding: 15px 16px; box-shadow: 0 1px 2px rgba(20,30,60,0.04); display: flex; align-items: center; gap: 13px;">' +
+        '<div style="width: 52px; height: 56px; border-radius: 15px; background: ' + e.bg + '; display: flex; flex-direction: column; align-items: center; justify-content: center; flex-shrink: 0;">' +
+          '<span style="font-size: 20px; font-weight: 800; color: ' + e.accent + '; line-height: 1;">' + e.day + '</span>' +
+          '<span style="font-size: 11px; font-weight: 700; color: ' + e.accent + ';">' + e.month + '</span>' +
+        '</div>' +
+        '<div style="flex: 1; min-width: 0;">' +
+          '<div style="display: inline-flex; align-items: center; padding: 3px 9px; border-radius: 20px; background: ' + e.bg + '; font-size: 11.5px; font-weight: 700; color: ' + e.accent + ';">' + escapeHtml(e.type) + '</div>' +
+          '<div style="font-size: 16px; font-weight: 700; color: #1b2440; margin-top: 6px; line-height: 1.2;">' + escapeHtml(e.subject) + '</div>' +
+          '<div style="font-size: 13px; color: #8a93a3; margin-top: 3px;">' + escapeHtml(e.sub) + '</div>' +
+        '</div>' +
+        '<div style="text-align: right; flex-shrink: 0;">' +
+          '<div style="font-size: 15px; font-weight: 800; color: ' + e.accent + ';">' + e.left + '</div>' +
+          '<div style="font-size: 11px; color: #aab2c0;">осталось</div>' +
+        '</div>' +
+      '</div>';
+    }
+    html += '</div>';
+    return html;
+  }
+
+  function searchResultsHtml() {
+    if (state.subjects.status === 'error') return errorScreenHtml('search');
+    var q = state.query.trim().toLowerCase();
+    var all = state.subjects.items;
+    var filtered = q ? all.filter(function (x) { return x.name.toLowerCase().indexOf(q) !== -1; }) : all;
+    if (all.length === 0) {
+      return emptyStateHtml('📭', 'Пока нет данных о предметах. Привяжи портал командой /link у бота.');
+    }
+    if (q.length > 0 && filtered.length === 0) {
+      return '<div style="text-align: center; padding: 40px 20px; color: #aab2c0;">' +
+        '<div style="font-size: 34px;">🔍</div>' +
+        '<div style="font-size: 14px; margin-top: 8px;">Ничего не найдено по «' + escapeHtml(state.query) + '»</div>' +
+      '</div>';
+    }
+    var html = '';
+    for (var i = 0; i < filtered.length; i++) {
+      var s = filtered[i];
+      html += '<div onclick="onSubjectTap(' + JSON.stringify(s.name) + ', ' + JSON.stringify(s.meta) + ')" style="background: #fff; border-radius: 20px; padding: 15px 16px; box-shadow: 0 1px 2px rgba(20,30,60,0.04); display: flex; align-items: center; gap: 13px; cursor: pointer; margin-bottom: 12px;">' +
+        '<div style="width: 46px; height: 46px; border-radius: 14px; background: ' + s.bg + '; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 22px;">' + s.emoji + '</div>' +
+        '<div style="flex: 1; min-width: 0;">' +
+          '<div style="font-size: 15.5px; font-weight: 700; color: #1b2440; line-height: 1.2;">' + escapeHtml(s.name) + '</div>' +
+          '<div style="font-size: 13px; color: #8a93a3; margin-top: 3px;">' + escapeHtml(s.meta) + '</div>' +
+        '</div>' +
+        '<svg width="9" height="16" viewBox="0 0 9 16" fill="none"><path d="M2 2l5 6-5 6" stroke="#c2cad6" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>' +
+      '</div>';
+    }
+    return html;
+  }
+
+  function onSearchInput(e) {
+    state.query = e.target.value;
+    document.getElementById('search-clear').innerHTML = state.query ? clearButtonHtml() : '';
+    document.getElementById('search-results').innerHTML = searchResultsHtml();
+  }
+  window.onSearchInput = onSearchInput;
+
+  function onSearchClear() {
+    haptic('light');
+    state.query = '';
+    var input = document.getElementById('search-input');
+    if (input) input.value = '';
+    document.getElementById('search-clear').innerHTML = '';
+    document.getElementById('search-results').innerHTML = searchResultsHtml();
+    if (input) input.focus();
+  }
+  window.onSearchClear = onSearchClear;
+
+  function clearButtonHtml() {
+    return '<div onclick="onSearchClear()" style="width: 22px; height: 22px; border-radius: 50%; background: #eef1f5; display: flex; align-items: center; justify-content: center; cursor: pointer;">' +
+      '<svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M2 2l7 7M9 2l-7 7" stroke="#8a93a3" stroke-width="1.8" stroke-linecap="round"/></svg>' +
+    '</div>';
+  }
+
+  function renderSearch() {
+    return '<div class="ub-screen" style="display: flex; flex-direction: column; gap: 12px;">' +
+      '<div style="padding: 4px 4px 2px;">' +
+        '<div style="font-size: 26px; font-weight: 800; color: #161e33; letter-spacing: -0.4px;">Поиск</div>' +
+        '<div style="font-size: 14px; color: #8a93a3; margin-top: 2px;">Найди пары и дедлайны по предмету</div>' +
+      '</div>' +
+      '<div style="display: flex; align-items: center; gap: 10px; background: #fff; border-radius: 16px; padding: 13px 15px; box-shadow: 0 1px 2px rgba(20,30,60,0.04);">' +
+        '<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><circle cx="9" cy="9" r="6" stroke="#aab2c0" stroke-width="2"/><path d="M13.5 13.5L18 18" stroke="#aab2c0" stroke-width="2" stroke-linecap="round"/></svg>' +
+        '<input id="search-input" value="' + escapeHtml(state.query) + '" oninput="onSearchInput(event)" placeholder="Например: математика" style="border: none; outline: none; flex: 1; font-size: 15px; color: #1b2440; background: transparent; font-family: inherit;">' +
+        '<div id="search-clear">' + (state.query ? clearButtonHtml() : '') + '</div>' +
+      '</div>' +
+      '<div id="search-results">' + searchResultsHtml() + '</div>' +
+    '</div>';
+  }
+
+  function renderBottomNavHtml() {
+    var s = state.screen;
+    var homeColor = s === 'home' ? ACTIVE : IDLE;
+    var todayColor = s === 'today' ? ACTIVE : IDLE;
+    var examsColor = s === 'exams' ? ACTIVE : IDLE;
+    var searchColor = s === 'search' ? ACTIVE : IDLE;
+    return '' +
+      '<div onclick="go(\'home\')" style="display: flex; flex-direction: column; align-items: center; gap: 4px; cursor: pointer; flex: 1;">' +
+        '<svg width="24" height="24" viewBox="0 0 24 24" fill="' + homeColor + '"><rect x="3" y="3" width="7.5" height="7.5" rx="2.2"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="2.2"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="2.2"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="2.2"/></svg>' +
+        '<span style="font-size: 11px; font-weight: 600; color: ' + homeColor + ';">Главная</span>' +
+      '</div>' +
+      '<div onclick="go(\'today\')" style="display: flex; flex-direction: column; align-items: center; gap: 4px; cursor: pointer; flex: 1;">' +
+        '<svg width="24" height="24" viewBox="0 0 24 24" fill="none"><rect x="4" y="5" width="16" height="15" rx="3.5" stroke="' + todayColor + '" stroke-width="2"/><path d="M4 9h16M8 3v4M16 3v4" stroke="' + todayColor + '" stroke-width="2" stroke-linecap="round"/></svg>' +
+        '<span style="font-size: 11px; font-weight: 600; color: ' + todayColor + ';">Сегодня</span>' +
+      '</div>' +
+      '<div onclick="go(\'exams\')" style="display: flex; flex-direction: column; align-items: center; gap: 4px; cursor: pointer; flex: 1;">' +
+        '<svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M12 4 2 8l10 4 10-4z" stroke="' + examsColor + '" stroke-width="2" stroke-linejoin="round"/><path d="M6 11v4c0 1.8 2.7 3 6 3s6-1.2 6-3v-4" stroke="' + examsColor + '" stroke-width="2" stroke-linejoin="round"/></svg>' +
+        '<span style="font-size: 11px; font-weight: 600; color: ' + examsColor + ';">Зачёты</span>' +
+      '</div>' +
+      '<div onclick="go(\'search\')" style="display: flex; flex-direction: column; align-items: center; gap: 4px; cursor: pointer; flex: 1;">' +
+        '<svg width="24" height="24" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="' + searchColor + '" stroke-width="2"/><path d="M16.5 16.5L21 21" stroke="' + searchColor + '" stroke-width="2" stroke-linecap="round"/></svg>' +
+        '<span style="font-size: 11px; font-weight: 600; color: ' + searchColor + ';">Поиск</span>' +
+      '</div>';
+  }
+
+  function renderHeaderAndNav() {
+    var s = state.screen;
+    var sd = state.week.days[state.selectedDay];
+    document.getElementById('header-left').innerHTML = renderHeaderLeft();
+    document.getElementById('header-title').textContent = (s === 'day' && sd) ? sd.name : titles[s][0];
+    document.getElementById('header-subtitle').textContent = titles[s][1];
+    document.getElementById('bottomnav').innerHTML = renderBottomNavHtml();
+  }
+
+  function renderScreenContent() {
+    var s = state.screen;
+    var html;
+    if (s === 'home') html = renderHome();
+    else if (s === 'today') html = renderToday();
+    else if (s === 'week') html = renderWeek();
+    else if (s === 'day') html = renderDay();
+    else if (s === 'exams') html = renderExams();
+    else html = renderSearch();
+    document.getElementById('screen').innerHTML = html;
+  }
+
+  function render() {
+    renderHeaderAndNav();
+    renderScreenContent();
+  }
+
+  document.addEventListener('DOMContentLoaded', function () {
+    try {
+      if (tg) {
+        tg.ready();
+        tg.expand();
+        if (tg.setHeaderColor) tg.setHeaderColor('#ffffff');
+        if (tg.BackButton) {
+          tg.BackButton.onClick(back);
+          syncBackButton();
+        }
+      }
+    } catch (e) {}
+    render();
+  });
+})();
+</script>
+</body>
+</html>
