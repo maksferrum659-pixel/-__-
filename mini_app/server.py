@@ -156,7 +156,10 @@ def get_calendar_link(request: Request, x_init_data: str = Header(..., alias="x-
 
 @app.get("/ical/{token}.ics")
 def get_ical(token: str) -> Response:
-    telegram_id = db.get_telegram_id_by_ical_token(token)
+    try:
+        telegram_id = db.get_telegram_id_by_ical_token(token)
+    except Exception:  # noqa: BLE001 — невалидный/чужой токен не должен ронять сервер 500-кой
+        telegram_id = None
     if telegram_id is None:
         raise HTTPException(status_code=404, detail="Токен не найден")
 
