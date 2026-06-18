@@ -189,10 +189,23 @@
   function onYandexClick() {
     haptic('light');
     apiGet('/api/calendar-link').then(function (data) {
-      showCalendarModal(data.webcal_url);
+      copyToClipboard(data.webcal_url).then(function (ok) {
+        if (ok) {
+          notify('Ссылка на календарь скопирована 📋\nВ Яндекс.Календаре: Добавить календарь → По ссылке.');
+        } else {
+          showCalendarModal(data.webcal_url);
+        }
+      });
     }).catch(function () {
       notify('Не удалось получить ссылку на календарь. Открой мини-апп из бота и попробуй снова.');
     });
+  }
+
+  function copyToClipboard(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text).then(function () { return true; }).catch(function () { return false; });
+    }
+    return Promise.resolve(false);
   }
 
   function showCalendarModal(webcalUrl) {
@@ -226,23 +239,17 @@
 
   function copyCalendarLink(webcalUrl) {
     haptic('medium');
-    var done = function (ok) {
+    copyToClipboard(webcalUrl).then(function (ok) {
       var btn = document.getElementById('calendar-copy-btn');
-      if (!btn) return;
-      btn.textContent = ok ? 'Скопировано ✓' : 'Не удалось — выдели вручную';
-      btn.style.background = ok ? '#1f9d4d' : '#aab2c0';
-    };
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(webcalUrl).then(function () { done(true); }).catch(function () {
+      if (btn) {
+        btn.textContent = ok ? 'Скопировано ✓' : 'Не удалось — выдели вручную';
+        btn.style.background = ok ? '#1f9d4d' : '#aab2c0';
+      }
+      if (!ok) {
         var input = document.getElementById('calendar-link-input');
         if (input) input.select();
-        done(false);
-      });
-    } else {
-      var input = document.getElementById('calendar-link-input');
-      if (input) input.select();
-      done(false);
-    }
+      }
+    });
   }
 
   window.closeCalendarModal = closeCalendarModal;
